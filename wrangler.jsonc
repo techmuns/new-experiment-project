@@ -17,15 +17,28 @@
   },
 
   // ---------------------------------------------------------------
-  // Phase 4A/4B/4C: LLM follow-up memo generation.
+  // Phase 4A/4B/4C/4D: LLM follow-up memo generation.
   //
-  // LLM_ENABLED="true" only turns on the server-side LLM path. It
-  // does NOT by itself authorize anyone to spend provider tokens.
+  // LLM_ENABLED="true" turns on the server-side LLM path. It does
+  // NOT by itself authorize anyone to spend provider tokens.
+  //
+  // LLM_PROVIDER selects the provider implementation:
+  //   "openai"    — default; calls api.openai.com/v1/responses
+  //                 with structured-output json_schema (strict).
+  //   "anthropic" — calls api.anthropic.com/v1/messages with
+  //                 tool_use; remains fully supported.
+  // LLM_MODEL is the model id passed to the selected provider
+  // (e.g. "gpt-5.2" for OpenAI, "claude-sonnet-4-6" for Anthropic).
+  //
+  // LLM_API_KEY MUST match the configured provider:
+  //   - LLM_PROVIDER="openai"    -> set LLM_API_KEY to an OpenAI key
+  //   - LLM_PROVIDER="anthropic" -> set LLM_API_KEY to an Anthropic key
+  // Single env var; the provider decides how to use it.
   //
   // LLM Memo v1 is still NOT ready unless BOTH of these secrets are
   // set out-of-band against the deployed Worker (never committed):
-  //   wrangler secret put LLM_API_KEY      # the Anthropic key
-  //   wrangler secret put LLM_GATE_SECRET  # the shared gate token
+  //   wrangler secret put LLM_API_KEY      # provider key
+  //   wrangler secret put LLM_GATE_SECRET  # shared in-app gate token
   // /api/llm/status reports llmReady:true only when all four hold:
   // LLM_ENABLED="true", provider configured, API key configured,
   // and (gate disabled OR gate secret configured).
@@ -35,7 +48,7 @@
   // the request carries a valid X-Memo-LLM-Gate header (constant-
   // time compare in src/worker/llm/provider.ts::checkGateToken).
   // Rejected requests return HTTP 200 {ok:false, code:
-  // "llm_access_denied"} and short-circuit before any Anthropic
+  // "llm_access_denied"} and short-circuit before any provider
   // call, so they cost nothing on the provider side. The client
   // falls back to the deterministic v0 generator.
   //
@@ -51,8 +64,8 @@
   // ---------------------------------------------------------------
   "vars": {
     "LLM_ENABLED": "true",
-    "LLM_PROVIDER": "anthropic",
-    "LLM_MODEL": "claude-sonnet-4-6",
+    "LLM_PROVIDER": "openai",
+    "LLM_MODEL": "gpt-5.2",
     "LLM_GATE_ENABLED": "true"
   }
 

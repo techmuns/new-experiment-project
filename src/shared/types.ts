@@ -251,7 +251,7 @@ export interface FollowUpMemoGenerationResult {
 
 // ---------- Phase 4A additions: LLM follow-up memo generation ----------
 
-export type LlmProviderName = "anthropic" | "none";
+export type LlmProviderName = "anthropic" | "openai" | "none";
 
 export interface LlmProviderMetadata {
   providerName: LlmProviderName;

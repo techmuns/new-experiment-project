@@ -3,6 +3,7 @@ import type {
   LlmGenerateResult,
   LlmProvider,
 } from "./types";
+import { combineWithTimeout, isTimeoutError } from "./abort";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -168,40 +169,6 @@ export function createAnthropicProvider(
       }
     },
   };
-}
-
-function combineWithTimeout(
-  userSignal: AbortSignal | undefined,
-  timeoutMs: number,
-): { signal: AbortSignal; clear: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort(new DOMException("Timeout", "TimeoutError"));
-  }, timeoutMs);
-
-  let forwardUser: (() => void) | null = null;
-  if (userSignal) {
-    if (userSignal.aborted) {
-      controller.abort(userSignal.reason);
-    } else {
-      forwardUser = () => controller.abort(userSignal.reason);
-      userSignal.addEventListener("abort", forwardUser, { once: true });
-    }
-  }
-
-  return {
-    signal: controller.signal,
-    clear() {
-      clearTimeout(timer);
-      if (userSignal && forwardUser) {
-        userSignal.removeEventListener("abort", forwardUser);
-      }
-    },
-  };
-}
-
-function isTimeoutError(err: unknown): boolean {
-  return err instanceof Error && err.name === "TimeoutError";
 }
 
 function logFailure(model: string, errorType: string): void {

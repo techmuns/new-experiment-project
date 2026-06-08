@@ -46,7 +46,7 @@ export function buildPrompt(
     "- Flag missing data explicitly. Do not invent numbers, dates, or commentary.",
     "- No fake precision. No unsupported claims. No generic AI commentary.",
     "- Cite only documentIds listed in the 'Available document IDs' table below.",
-    "- Emit output exclusively via the emit_follow_up_memo tool. No prose response.",
+    "- Emit a single JSON object matching the provided schema. Do not include prose outside the JSON.",
     "",
     "Output must contain exactly 9 sections in canonical order, matching these ids:",
     CANONICAL_SECTION_IDS.map(
@@ -137,7 +137,7 @@ function buildUserPrompt(req: GenerateFollowUpMemoRequest): string {
     "- 'Final Investment Action' must reflect the overall balance of evidence — no advice beyond what the data supports.",
   );
   lines.push(
-    "- Emit via the emit_follow_up_memo tool. Do not include prose outside the tool call.",
+    "- Emit a single JSON object that matches the schema. Do not include any prose outside the JSON.",
   );
 
   return lines.join("\n");

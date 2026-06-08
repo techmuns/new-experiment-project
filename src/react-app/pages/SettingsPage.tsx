@@ -140,7 +140,7 @@ export function SettingsPage() {
       <SectionHeader
         eyebrow="Settings"
         title="Bindings and secrets"
-        description="Phase 4B adds an app-level access gate for the optional LLM Follow-up Memo v1. Default is OFF for LLM, ON for the gate; deterministic v0 remains the always-available baseline."
+        description="LLM Follow-up Memo v1 defaults to the OpenAI provider; Anthropic remains available by setting LLM_PROVIDER. The app-level access gate stays on, and deterministic v0 remains the always-available fallback."
       />
 
       <Panel

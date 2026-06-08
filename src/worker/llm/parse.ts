@@ -76,6 +76,59 @@ export const FOLLOW_UP_MEMO_TOOL_SCHEMA: object = {
   },
 };
 
+// OpenAI Responses-API Structured Outputs (strict json_schema) requires
+// every property to appear in `required`, and does not support `minItems`
+// / `maxItems`. Optional app-model fields are expressed as nullable type
+// unions here; openai.ts normalizes nulls to absent before passing the
+// payload to parseLlmJson. The 9-section length invariant is enforced by
+// the prompt and by parseLlmJson, not by this schema.
+export const FOLLOW_UP_MEMO_OPENAI_SCHEMA: object = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sections"],
+  properties: {
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "title",
+          "summary",
+          "body",
+          "bullets",
+          "signal",
+          "sources",
+          "confidenceNote",
+        ],
+        properties: {
+          id: { type: "string", enum: CANONICAL_SECTION_IDS },
+          title: { type: "string" },
+          summary: { type: "string" },
+          body: { type: "string" },
+          bullets: { type: "array", items: { type: "string" } },
+          signal: { type: "string", enum: SIGNAL_VALUES },
+          sources: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["documentId", "page", "quote"],
+              properties: {
+                documentId: { type: "string" },
+                page: { type: ["number", "null"] },
+                quote: { type: ["string", "null"] },
+              },
+            },
+          },
+          confidenceNote: { type: ["string", "null"] },
+        },
+      },
+    },
+  },
+};
+
 export type ParseLlmJsonResult =
   | { ok: true; memo: FollowUpMemo; warnings: LlmGenerationWarning[] }
   | { ok: false; code: "malformed_output"; message: string };

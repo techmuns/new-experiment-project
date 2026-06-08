@@ -1,6 +1,16 @@
 import type { LlmProvider } from "./types";
 import type { LlmProviderName } from "@shared/types";
 import { createAnthropicProvider } from "./anthropic";
+import { createOpenAIProvider } from "./openai";
+
+const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const;
+type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+
+function asSupportedProvider(value: string | undefined): SupportedProvider | undefined {
+  return (SUPPORTED_PROVIDERS as readonly string[]).includes(value ?? "")
+    ? (value as SupportedProvider)
+    : undefined;
+}
 
 // Wrangler typegen narrows vars to their default literal values. This
 // widened view reflects the actual runtime shape — any of these may be
@@ -40,12 +50,11 @@ export interface LlmReadiness {
 export function evaluateLlmReadiness(env: Env): LlmReadiness {
   const e = readEnv(env);
   const llmEnabled = e.LLM_ENABLED === "true";
-  const providerConfigured = e.LLM_PROVIDER === "anthropic";
+  const supported = asSupportedProvider(e.LLM_PROVIDER);
+  const providerConfigured = supported !== undefined;
   const apiKeyConfigured = Boolean(e.LLM_API_KEY && e.LLM_API_KEY.length > 0);
   const model = e.LLM_MODEL && e.LLM_MODEL.length > 0 ? e.LLM_MODEL : undefined;
-  const provider: LlmProviderName | undefined = providerConfigured
-    ? "anthropic"
-    : undefined;
+  const provider: LlmProviderName | undefined = supported;
   const gateEnabled = e.LLM_GATE_ENABLED === "true";
   const gateConfigured = Boolean(
     e.LLM_GATE_SECRET && e.LLM_GATE_SECRET.length > 0,
@@ -143,6 +152,12 @@ export function getProvider(env: Env): LlmProvider | null {
   const apiKey = e.LLM_API_KEY;
   const model = e.LLM_MODEL;
   if (!apiKey || !model) return null;
-  if (e.LLM_PROVIDER !== "anthropic") return null;
-  return createAnthropicProvider(apiKey, model);
+  const supported = asSupportedProvider(e.LLM_PROVIDER);
+  if (!supported) return null;
+  switch (supported) {
+    case "openai":
+      return createOpenAIProvider(apiKey, model);
+    case "anthropic":
+      return createAnthropicProvider(apiKey, model);
+  }
 }
