@@ -75,6 +75,13 @@ export function buildMemoDnaFromText({ text, filename }: BuildOptions): MemoDNA 
 
 // ----- pieces -----
 
+export function detectCompanyFromText(
+  text: string,
+  filename: string,
+): string | undefined {
+  return detectCompany(text, filename);
+}
+
 function detectCompany(text: string, filename: string): string | undefined {
   const tokens = text.match(/\b[A-Z][A-Za-z0-9&'.-]{1,20}\b/g) ?? [];
   const tickers = tokens.filter((t) => isPotentialTicker(t));

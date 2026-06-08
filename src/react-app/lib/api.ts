@@ -6,7 +6,10 @@ import type {
   LlmStatusResponse,
   MemoDNA,
   MemoProject,
+  ResearchUpdatesRequest,
+  ResearchUpdatesResponse,
 } from "@shared/types";
+import { getLlmGateToken } from "./llmGateToken";
 
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -40,6 +43,16 @@ async function postJson<TResponse, TBody>(
   return res.json() as Promise<TResponse>;
 }
 
+// Attach the X-Memo-LLM-Gate header only when a non-empty token is set in
+// session storage (Settings → Advanced). When the gate is off, the worker
+// ignores the missing header; when the gate is on and the header is
+// missing, the worker returns {ok:false, code:"llm_access_denied"} which
+// the workspace surfaces as a "Setup required" panel.
+function gateHeader(): Record<string, string> {
+  const token = getLlmGateToken();
+  return token && token.length > 0 ? { "X-Memo-LLM-Gate": token } : {};
+}
+
 export const api = {
   health: () => getJson<HealthResponse>("/api/health"),
   demoProject: () => getJson<MemoProject>("/api/demo/project"),
@@ -49,14 +62,25 @@ export const api = {
   generateFollowUpMemo: (
     req: GenerateFollowUpMemoRequest,
     signal?: AbortSignal,
-    gateToken?: string,
   ) =>
     postJson<GenerateFollowUpMemoResponse, GenerateFollowUpMemoRequest>(
       "/api/generate/follow-up-memo",
       req,
       {
         signal,
-        headers: gateToken ? { "X-Memo-LLM-Gate": gateToken } : undefined,
+        headers: gateHeader(),
+      },
+    ),
+  researchUpdates: (
+    req: ResearchUpdatesRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJson<ResearchUpdatesResponse, ResearchUpdatesRequest>(
+      "/api/research/updates",
+      req,
+      {
+        signal,
+        headers: gateHeader(),
       },
     ),
 };

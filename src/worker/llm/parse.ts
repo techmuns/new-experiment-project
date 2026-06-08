@@ -262,7 +262,10 @@ function parseSources(
 function allowedDocumentIds(req: GenerateFollowUpMemoRequest): Set<string> {
   const set = new Set<string>();
   if (req.initialMemo.id) set.add(req.initialMemo.id);
-  for (const doc of req.updateDocs) set.add(doc.id);
+  for (const doc of req.updateDocs ?? []) set.add(doc.id);
+  if (req.research) {
+    for (const finding of req.research.findings) set.add(finding.id);
+  }
   return set;
 }
 

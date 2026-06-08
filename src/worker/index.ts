@@ -1,18 +1,23 @@
-// COST CONTROLS (Phase 4A / 4B):
+// COST CONTROLS (Phase 4A / 4B / 5):
 // - 8 MB request body cap; HTTP 413 on excess.
-// - Per-doc text trimming server-side (40K chars initial memo; 30K chars
-//   per update doc) — see src/worker/llm/trim.ts.
+// - Per-doc text trimming server-side (40K chars initial memo; research
+//   findings capped per src/worker/llm/trim.ts) — see trim.ts.
 // - 60s provider timeout via AbortController + manual user-signal
-//   forwarding — see src/worker/llm/anthropic.ts.
+//   forwarding — see src/worker/llm/abort.ts.
 // - Server-clamped max output tokens: default 8000, hard cap 12_000.
 //   Client-supplied model overrides are IGNORED — the deployed Worker
 //   trusts only c.env.LLM_MODEL.
-// - The access gate (Phase 4B) runs BEFORE any Anthropic call so
+// - The access gate (Phase 4B) runs BEFORE any provider call so
 //   rejected requests cost zero on the provider side.
+// - Research endpoint (Phase 5) is OpenAI-only; calls api.openai.com
+//   /v1/responses with the web_search built-in tool. Returns
+//   research_unavailable if provider is not openai, or if OpenAI itself
+//   refuses the tool.
 // - No automatic retries on 429 / 5xx.
 // - No streaming.
-// - NEVER logged: memo content, update-pack content, prompts, API key,
-//   the LLM_GATE_SECRET, the X-Memo-LLM-Gate header value, or c.env.
+// - NEVER logged: memo content, research content, source quotes,
+//   prompts, API key (LLM_API_KEY or OPENAI_API_KEY), the
+//   LLM_GATE_SECRET, the X-Memo-LLM-Gate header value, or c.env.
 import { Hono } from "hono";
 import { demoProject } from "@shared/demo/rategain-project";
 import { demoMemoDna } from "@shared/demo/rategain-memo-dna";
@@ -33,6 +38,7 @@ import {
 import { buildPrompt } from "./llm/prompt";
 import { FOLLOW_UP_MEMO_TOOL_SCHEMA, parseLlmJson } from "./llm/parse";
 import { trimRequestBody } from "./llm/trim";
+import { handleResearchUpdates } from "./research/route";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -61,21 +67,25 @@ app.get("/api/llm/status", (c) => {
     llmEnabled: r.llmEnabled,
     providerConfigured: r.providerConfigured,
     apiKeyConfigured: r.apiKeyConfigured,
+    apiKeySource: r.apiKeySource,
     provider: r.provider,
     model: r.model,
     gateEnabled: r.gateEnabled,
     gateConfigured: r.gateConfigured,
     llmReady: r.llmReady,
+    researchAvailable: r.researchAvailable,
     fallbackAvailable: true,
     warnings: r.warnings,
   };
   return c.json(body);
 });
 
+app.post("/api/research/updates", (c) => handleResearchUpdates(c));
+
 app.post("/api/generate/follow-up-memo", async (c) => {
   const declaredLength = Number(c.req.header("content-length") ?? "0");
   if (declaredLength > MAX_BODY_BYTES) {
-    return c.json({ error: "body_too_large" }, 413);
+    return c.json({ error: "payload_too_large" }, 413);
   }
 
   let bodyText: string;
@@ -85,7 +95,7 @@ app.post("/api/generate/follow-up-memo", async (c) => {
     return c.json({ error: "body_unreadable" }, 400);
   }
   if (bodyText.length > MAX_BODY_BYTES) {
-    return c.json({ error: "body_too_large" }, 413);
+    return c.json({ error: "payload_too_large" }, 413);
   }
 
   let parsed: unknown;
@@ -164,8 +174,9 @@ app.post("/api/generate/follow-up-memo", async (c) => {
 
   // Wrap the post-validation pipeline in a try/catch so any unexpected
   // error becomes a graceful provider_error rather than HTTP 500 — the
-  // client can then fall back to the deterministic v0 generator. Never
-  // logs the underlying error message (may contain user payload).
+  // client can then fall back to the demo memo or "Generate without
+  // research" path. Never logs the underlying error message (may contain
+  // user payload).
   try {
     const { system, user, jsonSchema } = buildPrompt(
       request,
@@ -316,24 +327,44 @@ function validateGenerateRequest(input: unknown): ValidationResult {
   if (typeof initialMemo.sizeBytes !== "number")
     return invalid("initialMemo.sizeBytes missing");
 
-  const updateDocs = input.updateDocs;
-  if (!Array.isArray(updateDocs))
-    return invalid("updateDocs must be an array");
-  if (updateDocs.length > MAX_UPDATE_DOCS)
-    return invalid(`too many updateDocs (>${MAX_UPDATE_DOCS})`);
-  for (const doc of updateDocs) {
-    if (!isPlainObject(doc)) return invalid("updateDoc not an object");
-    if (typeof doc.id !== "string") return invalid("updateDoc.id missing");
-    if (typeof doc.kind !== "string")
-      return invalid("updateDoc.kind missing");
-    if (typeof doc.filename !== "string")
-      return invalid("updateDoc.filename missing");
-    if (typeof doc.text !== "string")
-      return invalid("updateDoc.text missing");
+  // updateDocs is optional in Phase 5 (the workspace flow no longer
+  // collects update-pack uploads). If provided it must still be a
+  // length-bounded array of well-shaped doc objects.
+  if (input.updateDocs !== undefined) {
+    const updateDocs = input.updateDocs;
+    if (!Array.isArray(updateDocs))
+      return invalid("updateDocs must be an array");
+    if (updateDocs.length > MAX_UPDATE_DOCS)
+      return invalid(`too many updateDocs (>${MAX_UPDATE_DOCS})`);
+    for (const doc of updateDocs) {
+      if (!isPlainObject(doc)) return invalid("updateDoc not an object");
+      if (typeof doc.id !== "string") return invalid("updateDoc.id missing");
+      if (typeof doc.kind !== "string")
+        return invalid("updateDoc.kind missing");
+      if (typeof doc.filename !== "string")
+        return invalid("updateDoc.filename missing");
+      if (typeof doc.text !== "string")
+        return invalid("updateDoc.text missing");
+    }
   }
 
   if (!isPlainObject(input.dna)) return invalid("dna missing");
-  if (!isPlainObject(input.analysis)) return invalid("analysis missing");
+
+  if (input.analysis !== undefined && !isPlainObject(input.analysis)) {
+    return invalid("analysis must be an object when provided");
+  }
+
+  if (
+    input.research !== undefined &&
+    input.research !== null &&
+    !isPlainObject(input.research)
+  ) {
+    return invalid("research must be an object or null when provided");
+  }
+
+  if (input.detection !== undefined && !isPlainObject(input.detection)) {
+    return invalid("detection must be an object when provided");
+  }
 
   return { ok: true, value: input as unknown as GenerateFollowUpMemoRequest };
 }

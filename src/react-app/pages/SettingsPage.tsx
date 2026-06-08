@@ -1,18 +1,19 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import type { ComponentType, SVGProps } from "react";
 import {
-  Database,
-  HardDrive,
+  AlertCircle,
+  ChevronDown,
+  ChevronRight,
   KeyRound,
   Lock,
   ShieldCheck,
   Sparkles,
-  Workflow,
 } from "lucide-react";
-import type { ComponentType, SVGProps } from "react";
-import { AlertCircle } from "lucide-react";
 import { Badge } from "../components/ui/Badge";
-import { SectionHeader } from "../components/ui/SectionHeader";
+import { Button } from "../components/ui/Button";
 import { Panel } from "../components/ui/Panel";
+import { SectionHeader } from "../components/ui/SectionHeader";
+import { useLlmGateToken } from "../lib/llmGateToken";
 import { useMemoProject } from "../state/MemoProjectContext";
 
 type RowTone = "neutral" | "ink" | "accent" | "warning" | "success";
@@ -25,38 +26,12 @@ interface SettingsRow {
   tone: RowTone;
 }
 
-const STORAGE_ROWS: SettingsRow[] = [
-  {
-    icon: HardDrive,
-    label: "R2 bucket",
-    detail: "MEMO_UPLOADS — uploaded memos, financial PDFs, transcripts",
-    status: "Not connected",
-    tone: "neutral",
-  },
-  {
-    icon: Database,
-    label: "D1 database",
-    detail: "DB — projects, MemoDNA extractions, generation runs",
-    status: "Not connected",
-    tone: "neutral",
-  },
-  {
-    icon: Workflow,
-    label: "Queues + Workflows",
-    detail: "MEMO_QUEUE / MEMO_WORKFLOW — async extraction & generation",
-    status: "Not connected",
-    tone: "neutral",
-  },
-];
-
-function yesNoBadge(value: boolean, positive = true): RowTone {
-  if (value) return positive ? "success" : "warning";
-  return positive ? "neutral" : "success";
-}
-
 export function SettingsPage() {
-  const { state, refreshLlmProviderStatus } = useMemoProject();
+  const { state, refreshLlmProviderStatus, syncGateTokenSet } = useMemoProject();
   const status = state.llmProviderStatus;
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [gateToken, setGateToken] = useLlmGateToken();
+  const [draftToken, setDraftToken] = useState("");
 
   useEffect(() => {
     void refreshLlmProviderStatus();
@@ -65,22 +40,24 @@ export function SettingsPage() {
   const llmEnabled = status?.llmEnabled === true;
   const providerConfigured = status?.providerConfigured === true;
   const apiKeyConfigured = status?.apiKeyConfigured === true;
+  const apiKeySource = status?.apiKeySource ?? "none";
   const gateEnabled = status?.gateEnabled === true;
   const gateConfigured = status?.gateConfigured === true;
   const llmReady = status?.llmReady === true;
+  const researchAvailable = status?.researchAvailable === true;
   const warnings = status?.warnings ?? [];
 
-  const llmRows: SettingsRow[] = [
+  const rows: SettingsRow[] = [
     {
       icon: ShieldCheck,
       label: "LLM enabled",
       detail: 'LLM_ENABLED — server must set this var to "true"',
       status: llmEnabled ? "Yes" : "No",
-      tone: yesNoBadge(llmEnabled),
+      tone: llmEnabled ? "success" : "warning",
     },
     {
       icon: Sparkles,
-      label: "Provider configured",
+      label: "Provider",
       detail: "LLM_PROVIDER",
       status: status?.provider ?? "—",
       tone: providerConfigured ? "ink" : "neutral",
@@ -95,57 +72,67 @@ export function SettingsPage() {
     {
       icon: KeyRound,
       label: "API key configured",
-      detail: "LLM_API_KEY — set via `wrangler secret put LLM_API_KEY`",
+      detail:
+        apiKeySource === "none"
+          ? "Neither LLM_API_KEY nor OPENAI_API_KEY is set"
+          : `Loaded from ${apiKeySource} (value never returned)`,
       status: apiKeyConfigured ? "Yes" : "No",
-      tone: yesNoBadge(apiKeyConfigured),
+      tone: apiKeyConfigured ? "success" : "warning",
+    },
+    {
+      icon: Sparkles,
+      label: "Research available",
+      detail: "Requires OpenAI provider, valid key, gate satisfied",
+      status: researchAvailable ? "Yes" : "No",
+      tone: researchAvailable ? "success" : "neutral",
+    },
+    {
+      icon: Sparkles,
+      label: "LLM memo generation available",
+      detail: "Requires any supported provider + valid key + gate satisfied",
+      status: llmReady ? "Yes" : "No",
+      tone: llmReady ? "success" : "warning",
+    },
+    {
+      icon: ShieldCheck,
+      label: "Fallback / demo available",
+      detail: "GET /api/demo/follow-up-memo always returns a 9-section memo",
+      status: "Always available",
+      tone: "success",
     },
     {
       icon: Lock,
       label: "Access gate enabled",
-      detail: 'LLM_GATE_ENABLED — recommended "true" for public deployments',
+      detail:
+        'LLM_GATE_ENABLED — repo default is "true" because there is no Cloudflare Access / WAF / rate limiting configured yet. Operators can flip to "false" after configuring those.',
       status: gateEnabled ? "Yes" : "No",
-      tone: gateEnabled ? "success" : "warning",
-    },
-    {
-      icon: Lock,
-      label: "Access gate configured",
-      detail:
-        "LLM_GATE_SECRET — set via `wrangler secret put LLM_GATE_SECRET`",
-      status: gateConfigured ? "Yes" : "No",
-      tone: gateEnabled
-        ? gateConfigured
-          ? "success"
-          : "warning"
-        : "neutral",
-    },
-    {
-      icon: Sparkles,
-      label: "LLM Memo v1 ready",
-      detail: "Server-side readiness across all checks above",
-      status: llmReady ? "Yes" : "No",
-      tone: yesNoBadge(llmReady),
-    },
-    {
-      icon: ShieldCheck,
-      label: "Deterministic fallback",
-      detail:
-        "Deterministic v0 always runs in the browser if the LLM is unavailable or fails",
-      status: "Always available",
-      tone: "success",
+      tone: gateEnabled ? "accent" : "warning",
     },
   ];
+
+  const handleSave = (): void => {
+    setGateToken(draftToken.length > 0 ? draftToken : null);
+    setDraftToken("");
+    syncGateTokenSet();
+  };
+
+  const handleClear = (): void => {
+    setGateToken(null);
+    setDraftToken("");
+    syncGateTokenSet();
+  };
 
   return (
     <div className="space-y-7">
       <SectionHeader
         eyebrow="Settings"
-        title="Bindings and secrets"
-        description="LLM Follow-up Memo v1 defaults to the OpenAI provider; Anthropic remains available by setting LLM_PROVIDER. The app-level access gate stays on, and deterministic v0 remains the always-available fallback."
+        title="LLM configuration and readiness"
+        description="Memo Updater v1 generates a same-style follow-up memo from an uploaded original memo, an OpenAI web_search research pass, and the deployed LLM. This page shows the server-side readiness. No secrets are returned to the browser."
       />
 
       <Panel
-        eyebrow="LLM generation"
-        title={llmReady ? "LLM Memo v1 is ready" : "LLM Memo v1 is not ready"}
+        eyebrow="LLM"
+        title={llmReady ? "LLM is ready" : "LLM is not ready"}
         actions={
           <Badge tone={llmReady ? "success" : "neutral"} dot>
             {llmReady ? "Ready" : "Not ready"}
@@ -154,35 +141,105 @@ export function SettingsPage() {
       >
         {warnings.length > 0 && (
           <ul className="mb-3 space-y-1.5">
-            {warnings.map((msg) => {
-              const isWarning = !msg.startsWith("LLM is disabled");
-              return (
-                <li
-                  key={msg}
-                  className={`text-[11.5px] inline-flex items-start gap-1.5 leading-snug ${
-                    isWarning
-                      ? "text-[var(--color-warning)]"
-                      : "text-[var(--color-text-muted)]"
-                  }`}
-                >
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>{msg}</span>
-                </li>
-              );
-            })}
+            {warnings.map((msg) => (
+              <li
+                key={msg}
+                className="text-[11.5px] text-[var(--color-warning)] inline-flex items-start gap-1.5 leading-snug"
+              >
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{msg}</span>
+              </li>
+            ))}
           </ul>
         )}
-        <p className="text-[11.5px] text-[var(--color-text-subtle)] mb-2">
-          LLM Memo v1 sends extracted memo and update-pack text to the
-          configured LLM provider. Deterministic v0 stays local/browser-side.
-          Internal access tokens are stored in session storage only and are
-          never logged.
+        <p className="text-[11.5px] text-[var(--color-text-subtle)] mb-2 leading-relaxed">
+          The OpenAI key is preferred under <code className="font-mono">LLM_API_KEY</code>.
+          When <code className="font-mono">LLM_PROVIDER=openai</code>, a Cloudflare
+          secret already provisioned as <code className="font-mono">OPENAI_API_KEY</code>{" "}
+          is accepted as a fallback. Neither value is ever returned to the browser.
         </p>
-        <RowList rows={llmRows} />
+        <RowList rows={rows} />
       </Panel>
 
-      <Panel eyebrow="Storage and pipelines" title="Cloudflare bindings">
-        <RowList rows={STORAGE_ROWS} />
+      <Panel
+        eyebrow="Hardening reminder"
+        title="Cloudflare Access / WAF / rate limiting"
+      >
+        <p className="text-[12.5px] text-[var(--color-text-muted)] leading-relaxed">
+          The app-level gate token is a cost-spend deterrent only. Before any
+          non-internal deployment, configure Cloudflare Access, a WAF rule, or
+          an IP allowlist, and a rate-limit policy on the Worker. Once those
+          are in place an operator can set{" "}
+          <code className="font-mono">LLM_GATE_ENABLED="false"</code> in{" "}
+          <code className="font-mono">wrangler.jsonc</code> to drop the in-app
+          token UX.
+        </p>
+      </Panel>
+
+      <Panel
+        eyebrow="Advanced"
+        title="Internal access token"
+        actions={
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            leadingIcon={
+              advancedOpen ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5" />
+              )
+            }
+          >
+            {advancedOpen ? "Hide" : "Show"}
+          </Button>
+        }
+      >
+        {!advancedOpen ? (
+          <p className="text-[12px] text-[var(--color-text-subtle)] leading-relaxed">
+            For internal testing only. Stored in this tab's session storage and
+            sent as the <code className="font-mono">X-Memo-LLM-Gate</code>{" "}
+            header. The main workspace never shows this field.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[12px] text-[var(--color-text-muted)] leading-relaxed">
+              {gateEnabled
+                ? gateConfigured
+                  ? "The gate is enabled and the server has a secret. Paste the matching token below to unlock research / generation calls in this tab."
+                  : "The gate is enabled but no server secret is configured. Either set LLM_GATE_SECRET via wrangler secret put, or disable the gate."
+                : "The gate is disabled on the server. Tokens entered here will be sent but ignored."}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="password"
+                value={draftToken}
+                onChange={(e) => setDraftToken(e.target.value)}
+                placeholder={gateToken ? "(token set in this tab)" : "Paste internal access token"}
+                className="flex-1 px-2.5 py-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-mono"
+              />
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={draftToken.length === 0}
+              >
+                Save token
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleClear}
+                disabled={!gateToken && draftToken.length === 0}
+              >
+                Clear
+              </Button>
+            </div>
+            <p className="text-[11.5px] text-[var(--color-text-subtle)]">
+              Token status: {gateToken ? "set" : "not set"} (session storage only — never logged).
+            </p>
+          </div>
+        )}
       </Panel>
     </div>
   );
@@ -200,7 +257,7 @@ function RowList({ rows }: { rows: SettingsRow[] }) {
             <div className="text-[13px] font-semibold text-[var(--color-text)]">
               {label}
             </div>
-            <div className="text-[11.5px] text-[var(--color-text-muted)] mt-0.5 font-mono">
+            <div className="text-[11.5px] text-[var(--color-text-muted)] mt-0.5">
               {detail}
             </div>
           </div>

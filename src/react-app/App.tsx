@@ -1,23 +1,20 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
-import { OverviewPage } from "./pages/OverviewPage";
-import { IntakePage } from "./pages/IntakePage";
-import { MemoDnaPage } from "./pages/MemoDnaPage";
-import { BuilderPage } from "./pages/BuilderPage";
-import { OutputPage } from "./pages/OutputPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 function App() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<OverviewPage />} />
-        <Route path="/intake" element={<IntakePage />} />
-        <Route path="/memo-dna" element={<MemoDnaPage />} />
-        <Route path="/builder" element={<BuilderPage />} />
-        <Route path="/output" element={<OutputPage />} />
+        <Route path="/" element={<Navigate to="/workspace" replace />} />
+        <Route path="/workspace" element={<WorkspacePage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/intake" element={<Navigate to="/workspace" replace />} />
+        <Route path="/memo-dna" element={<Navigate to="/workspace" replace />} />
+        <Route path="/builder" element={<Navigate to="/workspace" replace />} />
+        <Route path="/output" element={<Navigate to="/workspace" replace />} />
+        <Route path="*" element={<Navigate to="/workspace" replace />} />
       </Routes>
     </AppShell>
   );

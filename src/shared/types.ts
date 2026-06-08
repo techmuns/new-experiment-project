@@ -260,15 +260,19 @@ export interface LlmProviderMetadata {
   outputTokens?: number;
 }
 
+export type ApiKeySource = "LLM_API_KEY" | "OPENAI_API_KEY" | "none";
+
 export interface LlmStatusResponse {
   llmEnabled: boolean;
   providerConfigured: boolean;
   apiKeyConfigured: boolean;
+  apiKeySource?: ApiKeySource;
   provider?: LlmProviderName;
   model?: string;
   gateEnabled: boolean;
   gateConfigured: boolean;
   llmReady: boolean;
+  researchAvailable?: boolean;
   fallbackAvailable: true;
   warnings: string[];
 }
@@ -293,13 +297,167 @@ export interface GenerateFollowUpMemoRequest {
     sourceFilename: string;
     sizeBytes: number;
   };
-  updateDocs: GenerateFollowUpMemoUpdateDoc[];
+  updateDocs?: GenerateFollowUpMemoUpdateDoc[];
   dna: MemoDNA;
-  analysis: UpdatePackAnalysis;
+  analysis?: UpdatePackAnalysis;
+  research?: ResearchFindings | null;
+  detection?: ResearchDetectionInput;
   generationOptions?: {
     maxTokens?: number;
   };
 }
+
+// ---------- Phase 5 additions: period detection + OpenAI research ----------
+
+export type DetectedPeriodKind =
+  | "iso_date"
+  | "month_year"
+  | "quarter_fy"
+  | "fiscal_year"
+  | "phrase";
+
+export interface DetectedPeriod {
+  rawMatch: string;
+  kind: DetectedPeriodKind;
+  isoDate?: string;
+  isoMonth?: string;
+  monthLabel?: string;
+  quarter?: "Q1" | "Q2" | "Q3" | "Q4";
+  fiscalYearLabel?: string;
+  fiscalYearNumber?: number;
+}
+
+export type DetectionConfidence = "high" | "medium" | "low";
+
+export interface PeriodDetectionResult {
+  detectedCompany?: string;
+  candidates: DetectedPeriod[];
+  best?: DetectedPeriod;
+  researchStart?: string;
+  researchCurrent: string;
+  confidence: DetectionConfidence;
+  assumptionNotes: string[];
+}
+
+export interface ResearchDetectionInput {
+  detectedCompany?: string;
+  periodLabel: string;
+  researchStart?: string;
+  researchCurrent: string;
+  assumptionNotes?: string[];
+}
+
+export type ResearchFindingCategory =
+  | "financials"
+  | "management"
+  | "filings"
+  | "guidance"
+  | "broker_consensus"
+  | "valuation"
+  | "peers"
+  | "macro"
+  | "ai_tech_risk"
+  | "other";
+
+export type ResearchFindingImpact = "positive" | "negative" | "neutral" | "watch";
+
+export interface ResearchSource {
+  title: string;
+  url: string;
+  date?: string;
+  note?: string;
+  verifiedByWebSearch?: boolean;
+}
+
+export interface ResearchFinding {
+  id: string;
+  category: ResearchFindingCategory;
+  title: string;
+  summary: string;
+  impact: ResearchFindingImpact;
+  relevance: string;
+  sources: ResearchSource[];
+  thesisCheckpointId?: string;
+}
+
+export interface ResearchThesisCheckpointImpact {
+  checkpointId: string;
+  impact: "supported" | "challenged" | "no_update";
+  note: string;
+  findingIds: string[];
+}
+
+export interface ResearchFindings {
+  generatedAt: string;
+  company: string;
+  researchWindow: { startIsoMonth: string; endIsoMonth: string };
+  findings: ResearchFinding[];
+  positiveDevelopments: string[];
+  negativeDevelopments: string[];
+  neutralOrWatch: string[];
+  thesisCheckpointImpact: ResearchThesisCheckpointImpact[];
+  unresolvedQuestions: string[];
+  warnings: string[];
+}
+
+export interface ResearchUpdatesRequest {
+  project: {
+    id: string;
+    ticker?: string;
+    companyName: string;
+    sector?: string;
+  };
+  initialMemo: {
+    id?: string;
+    text: string;
+    sourceFilename: string;
+    sizeBytes: number;
+  };
+  dna: MemoDNA;
+  detection: ResearchDetectionInput;
+  thesisCheckpoints?: ThesisCheckpoint[];
+  scope?: { maxFindings?: number };
+}
+
+export type ResearchErrorCode =
+  | "not_configured"
+  | "provider_missing"
+  | "api_key_missing"
+  | "gate_misconfigured"
+  | "llm_access_denied"
+  | "research_unavailable"
+  | "research_no_sources"
+  | "provider_error"
+  | "parse_error"
+  | "timeout"
+  | "rate_limited";
+
+export type ResearchUpdatesResponse =
+  | {
+      ok: true;
+      research: ResearchFindings;
+      providerMetadata: LlmProviderMetadata;
+      warnings: LlmGenerationWarning[];
+    }
+  | {
+      ok: false;
+      code: ResearchErrorCode;
+      message: string;
+      providerName?: LlmProviderName;
+      modelUsed?: string;
+      fallbackAvailable: true;
+    };
+
+export type ResearchGenerationState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | {
+      kind: "success";
+      research: ResearchFindings;
+      providerMetadata: LlmProviderMetadata;
+      warnings: LlmGenerationWarning[];
+    }
+  | { kind: "error"; code: ResearchErrorCode; message: string };
 
 export type LlmGenerationErrorCode =
   | "not_configured"

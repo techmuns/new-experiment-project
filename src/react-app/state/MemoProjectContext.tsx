@@ -9,104 +9,96 @@ import {
   type ReactNode,
 } from "react";
 import type {
-  DocumentKind,
   ExtractionResult,
   ExtractionStatus,
   FollowUpMemo,
-  FollowUpMemoGenerationResult,
-  GeneratedMemoStatus,
   GenerateFollowUpMemoRequest,
   GenerateFollowUpMemoResponse,
-  GenerateFollowUpMemoUpdateDoc,
   LlmGenerationState,
   LlmGenerationWarning,
   LlmStatusResponse,
   LocalUploadedFile,
-  MemoAnalysisMode,
   MemoDNA,
+  PeriodDetectionResult,
+  ResearchFindings,
+  ResearchGenerationState,
+  ResearchUpdatesRequest,
+  ResearchUpdatesResponse,
 } from "@shared/types";
 import { api } from "../lib/api";
 import { extractText } from "../lib/extract";
-import { extractionSupported, getExtension, mimeForFile } from "../lib/fileMeta";
+import {
+  extractionSupported,
+  getExtension,
+  mimeForFile,
+} from "../lib/fileMeta";
 import { buildMemoDnaFromText } from "../lib/memoDna";
-import { analyzeUpdatePack } from "../lib/updateAnalysis";
-import { generateFollowUpMemo } from "../lib/followUpMemo";
+import { detectPeriodFromMemoText } from "../lib/periodDetect";
+import { getLlmGateToken } from "../lib/llmGateToken";
+
+const GATE_TOKEN_POLL_KEY = "memo.llm.gate";
+
+export interface PeriodOverride {
+  detectedCompany?: string;
+  periodLabel?: string;
+  researchStart?: string;
+}
 
 interface State {
-  uploads: Partial<Record<DocumentKind, LocalUploadedFile>>;
+  initialFile: LocalUploadedFile | null;
   extraction: ExtractionResult | null;
   extractionStatus: ExtractionStatus;
-  updateExtractions: Partial<Record<DocumentKind, ExtractionResult>>;
-  updateExtractionStatuses: Partial<Record<DocumentKind, ExtractionStatus>>;
-  extractedDna: MemoDNA | null;
-  demoDna: MemoDNA | null;
-  demoFollowUpMemo: FollowUpMemo | null;
+  dna: MemoDNA | null;
+  detection: PeriodDetectionResult | null;
+  periodOverride: PeriodOverride;
+  research: ResearchFindings | null;
+  researchState: ResearchGenerationState;
   generatedMemo: FollowUpMemo | null;
-  generationError: string | null;
   llm: LlmGenerationState;
   llmProviderStatus: LlmStatusResponse | null;
-  mode: MemoAnalysisMode;
+  demoFollowUpMemo: FollowUpMemo | null;
+  gateTokenSet: boolean;
 }
 
 type Action =
-  | { type: "SET_UPLOAD"; kind: DocumentKind; file: LocalUploadedFile }
-  | { type: "REMOVE_UPLOAD"; kind: DocumentKind }
+  | { type: "SET_INITIAL_FILE"; file: LocalUploadedFile | null }
   | { type: "SET_EXTRACTION_STATUS"; status: ExtractionStatus }
   | { type: "SET_EXTRACTION"; result: ExtractionResult }
   | {
-      type: "SET_UPDATE_EXTRACTION_STATUS";
-      kind: DocumentKind;
-      status: ExtractionStatus;
+      type: "SET_DNA_AND_DETECTION";
+      dna: MemoDNA;
+      detection: PeriodDetectionResult;
     }
-  | { type: "SET_UPDATE_EXTRACTION"; kind: DocumentKind; result: ExtractionResult }
-  | { type: "SET_EXTRACTED_DNA"; dna: MemoDNA }
-  | { type: "SET_DEMO_DNA"; dna: MemoDNA }
-  | { type: "SET_DEMO_FOLLOW_UP"; memo: FollowUpMemo }
-  | { type: "SET_GENERATED_MEMO"; memo: FollowUpMemo }
-  | { type: "CLEAR_GENERATED_MEMO" }
-  | { type: "SET_GENERATION_ERROR"; error: string | null }
+  | { type: "SET_PERIOD_OVERRIDE"; override: PeriodOverride }
+  | { type: "SET_RESEARCH_STATE"; state: ResearchGenerationState }
+  | { type: "SET_RESEARCH"; research: ResearchFindings | null }
   | { type: "SET_LLM_STATE"; state: LlmGenerationState }
+  | { type: "SET_GENERATED_MEMO"; memo: FollowUpMemo | null }
   | { type: "SET_LLM_PROVIDER_STATUS"; status: LlmStatusResponse | null }
-  | { type: "SET_MODE"; mode: MemoAnalysisMode }
-  | { type: "RESET_EXTRACTED" };
+  | { type: "SET_DEMO_MEMO"; memo: FollowUpMemo | null }
+  | { type: "SET_GATE_TOKEN_SET"; value: boolean }
+  | { type: "RESET" };
 
 const initialState: State = {
-  uploads: {},
+  initialFile: null,
   extraction: null,
   extractionStatus: "idle",
-  updateExtractions: {},
-  updateExtractionStatuses: {},
-  extractedDna: null,
-  demoDna: null,
-  demoFollowUpMemo: null,
+  dna: null,
+  detection: null,
+  periodOverride: {},
+  research: null,
+  researchState: { kind: "idle" },
   generatedMemo: null,
-  generationError: null,
   llm: { kind: "idle" },
   llmProviderStatus: null,
-  mode: "demo",
+  demoFollowUpMemo: null,
+  gateTokenSet: false,
 };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
-    case "SET_UPLOAD":
-      return {
-        ...state,
-        uploads: { ...state.uploads, [action.kind]: action.file },
-      };
-    case "REMOVE_UPLOAD": {
-      const nextUploads = { ...state.uploads };
-      delete nextUploads[action.kind];
-      const nextExtractions = { ...state.updateExtractions };
-      delete nextExtractions[action.kind];
-      const nextStatuses = { ...state.updateExtractionStatuses };
-      delete nextStatuses[action.kind];
-      return {
-        ...state,
-        uploads: nextUploads,
-        updateExtractions: nextExtractions,
-        updateExtractionStatuses: nextStatuses,
-      };
-    }
+    case "SET_INITIAL_FILE":
+      return { ...state, initialFile: action.file };
     case "SET_EXTRACTION_STATUS":
       return { ...state, extractionStatus: action.status };
     case "SET_EXTRACTION":
@@ -115,99 +107,81 @@ function reducer(state: State, action: Action): State {
         extraction: action.result,
         extractionStatus: action.result.status,
       };
-    case "SET_UPDATE_EXTRACTION_STATUS":
+    case "SET_DNA_AND_DETECTION":
       return {
         ...state,
-        updateExtractionStatuses: {
-          ...state.updateExtractionStatuses,
-          [action.kind]: action.status,
+        dna: action.dna,
+        detection: action.detection,
+        periodOverride: {
+          detectedCompany: action.detection.detectedCompany,
+          periodLabel: action.detection.best
+            ? renderPeriodLabel(action.detection.best)
+            : undefined,
+          researchStart: action.detection.researchStart,
         },
-      };
-    case "SET_UPDATE_EXTRACTION":
-      return {
-        ...state,
-        updateExtractions: {
-          ...state.updateExtractions,
-          [action.kind]: action.result,
-        },
-        updateExtractionStatuses: {
-          ...state.updateExtractionStatuses,
-          [action.kind]: action.result.status,
-        },
-      };
-    case "SET_EXTRACTED_DNA":
-      return { ...state, extractedDna: action.dna, mode: "extracted" };
-    case "SET_DEMO_DNA":
-      return { ...state, demoDna: action.dna };
-    case "SET_DEMO_FOLLOW_UP":
-      return { ...state, demoFollowUpMemo: action.memo };
-    case "SET_GENERATED_MEMO":
-      return { ...state, generatedMemo: action.memo, generationError: null };
-    case "CLEAR_GENERATED_MEMO":
-      return {
-        ...state,
+        research: null,
+        researchState: { kind: "idle" },
         generatedMemo: null,
-        generationError: null,
         llm: { kind: "idle" },
       };
-    case "SET_GENERATION_ERROR":
-      return { ...state, generationError: action.error };
+    case "SET_PERIOD_OVERRIDE":
+      return {
+        ...state,
+        periodOverride: { ...state.periodOverride, ...action.override },
+      };
+    case "SET_RESEARCH_STATE":
+      return { ...state, researchState: action.state };
+    case "SET_RESEARCH":
+      return { ...state, research: action.research };
     case "SET_LLM_STATE":
       return { ...state, llm: action.state };
+    case "SET_GENERATED_MEMO":
+      return { ...state, generatedMemo: action.memo };
     case "SET_LLM_PROVIDER_STATUS":
       return { ...state, llmProviderStatus: action.status };
-    case "SET_MODE":
-      return { ...state, mode: action.mode };
-    case "RESET_EXTRACTED":
+    case "SET_DEMO_MEMO":
+      return { ...state, demoFollowUpMemo: action.memo };
+    case "SET_GATE_TOKEN_SET":
+      return { ...state, gateTokenSet: action.value };
+    case "RESET":
       return {
-        ...state,
-        uploads: {},
-        extraction: null,
-        extractionStatus: "idle",
-        updateExtractions: {},
-        updateExtractionStatuses: {},
-        extractedDna: null,
-        generatedMemo: null,
-        generationError: null,
-        llm: { kind: "idle" },
-        mode: "demo",
+        ...initialState,
+        llmProviderStatus: state.llmProviderStatus,
+        demoFollowUpMemo: state.demoFollowUpMemo,
+        gateTokenSet: state.gateTokenSet,
       };
   }
 }
 
 interface MemoProjectContextValue {
   state: State;
-  currentDna: MemoDNA | null;
-  currentMode: MemoAnalysisMode;
-  generationStatus: GeneratedMemoStatus;
-  usableUpdateCount: number;
-  setUpload: (kind: DocumentKind, file: File) => LocalUploadedFile;
-  removeUpload: (kind: DocumentKind) => void;
+  effectiveDetection: {
+    detectedCompany: string;
+    periodLabel: string;
+    researchStart?: string;
+    researchCurrent: string;
+    assumptionNotes: string[];
+  } | null;
   extractInitialMemo: (file: File) => Promise<ExtractionResult>;
-  extractUpdateDoc: (kind: DocumentKind, file: File) => Promise<ExtractionResult>;
-  buildDnaFromCurrentExtraction: () => MemoDNA | null;
-  generateFollowUp: () => FollowUpMemoGenerationResult | null;
-  generateLlmFollowUp: (gateToken?: string) => Promise<void>;
+  setPeriodOverride: (override: PeriodOverride) => void;
+  runResearch: () => Promise<void>;
+  generateMemo: (withResearch: boolean) => Promise<void>;
   refreshLlmProviderStatus: () => Promise<void>;
-  clearGeneratedMemo: () => void;
-  setMode: (mode: MemoAnalysisMode) => void;
-  resetExtracted: () => void;
+  syncGateTokenSet: () => void;
+  startOver: () => void;
 }
 
 const Ctx = createContext<MemoProjectContextValue | null>(null);
 
 export function MemoProjectProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const llmAbortRef = useRef<AbortController | null>(null);
+  const researchAbort = useRef<AbortController | null>(null);
+  const generateAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     api
-      .demoMemoDna()
-      .then((dna) => dispatch({ type: "SET_DEMO_DNA", dna }))
-      .catch(() => {});
-    api
       .demoFollowUpMemo()
-      .then((memo) => dispatch({ type: "SET_DEMO_FOLLOW_UP", memo }))
+      .then((memo) => dispatch({ type: "SET_DEMO_MEMO", memo }))
       .catch(() => {});
     api
       .llmStatus()
@@ -217,14 +191,29 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
       .catch(() =>
         dispatch({ type: "SET_LLM_PROVIDER_STATUS", status: null }),
       );
+    dispatch({
+      type: "SET_GATE_TOKEN_SET",
+      value: Boolean(getLlmGateToken()),
+    });
+    // Cross-tab gate-token changes:
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key === GATE_TOKEN_POLL_KEY) {
+        dispatch({
+          type: "SET_GATE_TOKEN_SET",
+          value: Boolean(getLlmGateToken()),
+        });
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const setUpload = useCallback(
-    (kind: DocumentKind, file: File): LocalUploadedFile => {
+  const extractInitialMemo = useCallback(
+    async (file: File): Promise<ExtractionResult> => {
       const ext = getExtension(file.name);
       const local: LocalUploadedFile = {
-        id: `local_${kind}_${Date.now()}`,
-        kind,
+        id: `local_initial_${Date.now()}`,
+        kind: "initial_memo",
         filename: file.name,
         sizeBytes: file.size,
         mime: mimeForFile(file),
@@ -232,93 +221,26 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
         uploadedAt: new Date().toISOString(),
         extractionSupported: extractionSupported(ext),
       };
-      dispatch({ type: "SET_UPLOAD", kind, file: local });
-      return local;
+      dispatch({ type: "SET_INITIAL_FILE", file: local });
+      dispatch({ type: "SET_EXTRACTION_STATUS", status: "extracting" });
+      const result = await extractText(file);
+      dispatch({ type: "SET_EXTRACTION", result });
+      if (result.status === "success" || result.status === "partial") {
+        const dna = buildMemoDnaFromText({
+          text: result.text,
+          filename: result.source.filename,
+        });
+        const detection = detectPeriodFromMemoText(result.text);
+        dispatch({ type: "SET_DNA_AND_DETECTION", dna, detection });
+      }
+      return result;
     },
     [],
   );
 
-  const removeUpload = useCallback((kind: DocumentKind) => {
-    dispatch({ type: "REMOVE_UPLOAD", kind });
+  const setPeriodOverride = useCallback((override: PeriodOverride) => {
+    dispatch({ type: "SET_PERIOD_OVERRIDE", override });
   }, []);
-
-  const extractInitialMemo = useCallback(
-    async (file: File): Promise<ExtractionResult> => {
-      setUpload("initial_memo", file);
-      dispatch({ type: "SET_EXTRACTION_STATUS", status: "extracting" });
-      const result = await extractText(file);
-      dispatch({ type: "SET_EXTRACTION", result });
-      return result;
-    },
-    [setUpload],
-  );
-
-  const extractUpdateDoc = useCallback(
-    async (kind: DocumentKind, file: File): Promise<ExtractionResult> => {
-      setUpload(kind, file);
-      dispatch({
-        type: "SET_UPDATE_EXTRACTION_STATUS",
-        kind,
-        status: "extracting",
-      });
-      const result = await extractText(file);
-      dispatch({ type: "SET_UPDATE_EXTRACTION", kind, result });
-      // A successful re-extract invalidates any previously generated memo.
-      dispatch({ type: "CLEAR_GENERATED_MEMO" });
-      return result;
-    },
-    [setUpload],
-  );
-
-  const buildDnaFromCurrentExtraction = useCallback((): MemoDNA | null => {
-    const e = state.extraction;
-    if (!e || (e.status !== "success" && e.status !== "partial")) return null;
-    const dna = buildMemoDnaFromText({ text: e.text, filename: e.source.filename });
-    dispatch({ type: "SET_EXTRACTED_DNA", dna });
-    dispatch({ type: "CLEAR_GENERATED_MEMO" });
-    return dna;
-  }, [state.extraction]);
-
-  const generateFollowUp = useCallback((): FollowUpMemoGenerationResult | null => {
-    const dna =
-      state.mode === "extracted" && state.extractedDna
-        ? state.extractedDna
-        : state.demoDna;
-    if (!dna) return null;
-    try {
-      dispatch({ type: "SET_GENERATION_ERROR", error: null });
-      const analysis = analyzeUpdatePack({
-        extractions: state.updateExtractions,
-        uploads: state.uploads,
-      });
-      if (analysis.documentsAnalyzed.length === 0) {
-        dispatch({
-          type: "SET_GENERATION_ERROR",
-          error: "No update-pack documents successfully extracted yet.",
-        });
-        return null;
-      }
-      const generatedAt = new Date().toISOString();
-      const result = generateFollowUpMemo({
-        dna,
-        analysis,
-        uploads: state.uploads,
-        generatedAt,
-      });
-      dispatch({ type: "SET_GENERATED_MEMO", memo: result.memo });
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Generation failed";
-      dispatch({ type: "SET_GENERATION_ERROR", error: msg });
-      return null;
-    }
-  }, [
-    state.mode,
-    state.extractedDna,
-    state.demoDna,
-    state.updateExtractions,
-    state.uploads,
-  ]);
 
   const refreshLlmProviderStatus = useCallback(async (): Promise<void> => {
     try {
@@ -329,201 +251,239 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const generateLlmFollowUp = useCallback(async (gateToken?: string): Promise<void> => {
-    const dna =
-      state.mode === "extracted" && state.extractedDna
-        ? state.extractedDna
-        : state.demoDna;
-    if (!dna || !state.extraction) return;
-    if (
-      state.extraction.status !== "success" &&
-      state.extraction.status !== "partial"
-    ) {
-      return;
-    }
-    const analysis = analyzeUpdatePack({
-      extractions: state.updateExtractions,
-      uploads: state.uploads,
+  const syncGateTokenSet = useCallback((): void => {
+    dispatch({
+      type: "SET_GATE_TOKEN_SET",
+      value: Boolean(getLlmGateToken()),
     });
-    if (analysis.documentsAnalyzed.length === 0) return;
+  }, []);
 
-    llmAbortRef.current?.abort();
-    const controller = new AbortController();
-    llmAbortRef.current = controller;
+  const runResearch = useCallback(async (): Promise<void> => {
+    if (!state.dna || !state.extraction || !state.initialFile) return;
+    const periodLabel =
+      state.periodOverride.periodLabel ??
+      (state.detection?.best ? renderPeriodLabel(state.detection.best) : "");
+    if (!periodLabel) return;
 
-    dispatch({ type: "SET_LLM_STATE", state: { kind: "loading" } });
+    const companyName =
+      state.periodOverride.detectedCompany ??
+      state.detection?.detectedCompany ??
+      state.initialFile.filename.replace(/\.[^.]+$/, "");
 
-    const updateDocs: GenerateFollowUpMemoUpdateDoc[] = (
-      Object.keys(state.updateExtractions) as DocumentKind[]
-    ).reduce<GenerateFollowUpMemoUpdateDoc[]>((acc, kind) => {
-      const ext = state.updateExtractions[kind];
-      const upload = state.uploads[kind];
-      if (!ext || !upload) return acc;
-      if (ext.status !== "success" && ext.status !== "partial") return acc;
-      acc.push({
-        id: upload.id,
-        kind,
-        filename: upload.filename,
-        text: ext.text,
-      });
-      return acc;
-    }, []);
-
-    const initialUpload = state.uploads.initial_memo;
-    const initialFilename = state.extraction.source.filename;
-    const initialSizeBytes =
-      initialUpload?.sizeBytes ?? state.extraction.source.sizeBytes;
-
-    const projectLabel = dna.projectId;
-    const req: GenerateFollowUpMemoRequest = {
+    const req: ResearchUpdatesRequest = {
       project: {
-        id: dna.projectId,
-        ticker: projectLabel,
-        companyName: projectLabel,
+        id: state.dna.projectId,
+        companyName,
       },
       initialMemo: {
-        id: initialUpload?.id,
+        id: state.initialFile.id,
         text: state.extraction.text,
-        sourceFilename: initialFilename,
-        sizeBytes: initialSizeBytes,
+        sourceFilename: state.extraction.source.filename,
+        sizeBytes: state.extraction.source.sizeBytes,
       },
-      updateDocs,
-      dna,
-      analysis,
+      dna: state.dna,
+      detection: {
+        detectedCompany: companyName,
+        periodLabel,
+        researchStart: state.periodOverride.researchStart,
+        researchCurrent:
+          state.detection?.researchCurrent ??
+          new Date().toISOString().slice(0, 7),
+        assumptionNotes: state.detection?.assumptionNotes ?? [],
+      },
+      thesisCheckpoints: state.dna.thesisCheckpoints,
     };
 
-    let response: GenerateFollowUpMemoResponse | null = null;
-    let networkError = "";
-    try {
-      response = await api.generateFollowUpMemo(req, controller.signal, gateToken);
-    } catch (err) {
-      networkError = err instanceof Error ? err.message : "Network error";
-    }
+    researchAbort.current?.abort();
+    const controller = new AbortController();
+    researchAbort.current = controller;
+    dispatch({ type: "SET_RESEARCH_STATE", state: { kind: "loading" } });
 
-    // Bail if a newer generation superseded us.
-    if (llmAbortRef.current !== controller) return;
-    llmAbortRef.current = null;
+    let response: ResearchUpdatesResponse | null = null;
+    let networkMessage = "";
+    try {
+      response = await api.researchUpdates(req, controller.signal);
+    } catch (err) {
+      networkMessage = err instanceof Error ? err.message : "Network error";
+    }
+    if (researchAbort.current !== controller) return;
+    researchAbort.current = null;
 
     if (response && response.ok) {
       dispatch({
-        type: "SET_LLM_STATE",
+        type: "SET_RESEARCH_STATE",
         state: {
           kind: "success",
-          memo: response.memo,
+          research: response.research,
           providerMetadata: response.providerMetadata,
-          usedFallback: false,
           warnings: response.warnings,
+        },
+      });
+      dispatch({ type: "SET_RESEARCH", research: response.research });
+      return;
+    }
+    if (response) {
+      dispatch({
+        type: "SET_RESEARCH_STATE",
+        state: {
+          kind: "error",
+          code: response.code,
+          message: response.message,
         },
       });
       return;
     }
-
-    const warning: LlmGenerationWarning = response
-      ? { code: response.code, message: response.message }
-      : { code: "provider_error", message: networkError || "Network error" };
-
-    try {
-      const generatedAt = new Date().toISOString();
-      const fallback = generateFollowUpMemo({
-        dna,
-        analysis,
-        uploads: state.uploads,
-        generatedAt,
-      });
-      dispatch({
-        type: "SET_LLM_STATE",
-        state: {
-          kind: "success",
-          memo: fallback.memo,
-          providerMetadata: {
-            providerName: "none",
-            modelUsed: "deterministic-fallback",
-          },
-          usedFallback: true,
-          warnings: [warning],
-        },
-      });
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Fallback generation failed";
-      dispatch({
-        type: "SET_LLM_STATE",
-        state: { kind: "error", error: msg },
-      });
-    }
+    dispatch({
+      type: "SET_RESEARCH_STATE",
+      state: {
+        kind: "error",
+        code: "provider_error",
+        message: networkMessage || "Network error",
+      },
+    });
   }, [
-    state.mode,
-    state.extractedDna,
-    state.demoDna,
+    state.dna,
     state.extraction,
-    state.updateExtractions,
-    state.uploads,
+    state.initialFile,
+    state.detection,
+    state.periodOverride,
   ]);
 
-  const clearGeneratedMemo = useCallback(() => {
-    dispatch({ type: "CLEAR_GENERATED_MEMO" });
-  }, []);
+  const generateMemo = useCallback(
+    async (withResearch: boolean): Promise<void> => {
+      if (!state.dna || !state.extraction || !state.initialFile) return;
+      const companyName =
+        state.periodOverride.detectedCompany ??
+        state.detection?.detectedCompany ??
+        state.initialFile.filename.replace(/\.[^.]+$/, "");
+      const periodLabel =
+        state.periodOverride.periodLabel ??
+        (state.detection?.best ? renderPeriodLabel(state.detection.best) : "");
 
-  const setMode = useCallback((mode: MemoAnalysisMode) => {
-    dispatch({ type: "SET_MODE", mode });
-  }, []);
+      const req: GenerateFollowUpMemoRequest = {
+        project: {
+          id: state.dna.projectId,
+          ticker: companyName,
+          companyName,
+        },
+        initialMemo: {
+          id: state.initialFile.id,
+          text: state.extraction.text,
+          sourceFilename: state.extraction.source.filename,
+          sizeBytes: state.extraction.source.sizeBytes,
+        },
+        dna: state.dna,
+        research: withResearch ? state.research : null,
+        detection: periodLabel
+          ? {
+              detectedCompany: companyName,
+              periodLabel,
+              researchStart: state.periodOverride.researchStart,
+              researchCurrent:
+                state.detection?.researchCurrent ??
+                new Date().toISOString().slice(0, 7),
+              assumptionNotes: state.detection?.assumptionNotes ?? [],
+            }
+          : undefined,
+      };
 
-  const resetExtracted = useCallback(() => {
-    dispatch({ type: "RESET_EXTRACTED" });
+      generateAbort.current?.abort();
+      const controller = new AbortController();
+      generateAbort.current = controller;
+      dispatch({ type: "SET_LLM_STATE", state: { kind: "loading" } });
+
+      let response: GenerateFollowUpMemoResponse | null = null;
+      let networkMessage = "";
+      try {
+        response = await api.generateFollowUpMemo(req, controller.signal);
+      } catch (err) {
+        networkMessage = err instanceof Error ? err.message : "Network error";
+      }
+      if (generateAbort.current !== controller) return;
+      generateAbort.current = null;
+
+      if (response && response.ok) {
+        dispatch({
+          type: "SET_GENERATED_MEMO",
+          memo: response.memo,
+        });
+        dispatch({
+          type: "SET_LLM_STATE",
+          state: {
+            kind: "success",
+            memo: response.memo,
+            providerMetadata: response.providerMetadata,
+            usedFallback: false,
+            warnings: response.warnings,
+          },
+        });
+        return;
+      }
+
+      const warning: LlmGenerationWarning = response
+        ? { code: response.code, message: response.message }
+        : { code: "provider_error", message: networkMessage || "Network error" };
+      dispatch({
+        type: "SET_LLM_STATE",
+        state: { kind: "error", error: warning.message },
+      });
+    },
+    [
+      state.dna,
+      state.extraction,
+      state.initialFile,
+      state.research,
+      state.detection,
+      state.periodOverride,
+    ],
+  );
+
+  const startOver = useCallback(() => {
+    researchAbort.current?.abort();
+    generateAbort.current?.abort();
+    researchAbort.current = null;
+    generateAbort.current = null;
+    dispatch({ type: "RESET" });
   }, []);
 
   const value = useMemo<MemoProjectContextValue>(() => {
-    const currentDna =
-      state.mode === "extracted" && state.extractedDna
-        ? state.extractedDna
-        : state.demoDna;
-
-    const usableUpdateCount = (
-      Object.keys(state.updateExtractions) as DocumentKind[]
-    ).filter((k) => {
-      const s = state.updateExtractions[k]?.status;
-      return s === "success" || s === "partial";
-    }).length;
-
-    const generationStatus: GeneratedMemoStatus = state.generatedMemo
-      ? "generated"
-      : !state.extractedDna
-        ? "missing_initial_memo"
-        : usableUpdateCount === 0
-          ? "missing_update_pack"
-          : "ready";
+    const effectiveDetection = state.detection
+      ? {
+          detectedCompany:
+            state.periodOverride.detectedCompany ??
+            state.detection.detectedCompany ??
+            "",
+          periodLabel:
+            state.periodOverride.periodLabel ??
+            (state.detection.best
+              ? renderPeriodLabel(state.detection.best)
+              : ""),
+          researchStart: state.periodOverride.researchStart,
+          researchCurrent: state.detection.researchCurrent,
+          assumptionNotes: state.detection.assumptionNotes,
+        }
+      : null;
 
     return {
       state,
-      currentDna,
-      currentMode: state.mode,
-      generationStatus,
-      usableUpdateCount,
-      setUpload,
-      removeUpload,
+      effectiveDetection,
       extractInitialMemo,
-      extractUpdateDoc,
-      buildDnaFromCurrentExtraction,
-      generateFollowUp,
-      generateLlmFollowUp,
+      setPeriodOverride,
+      runResearch,
+      generateMemo,
       refreshLlmProviderStatus,
-      clearGeneratedMemo,
-      setMode,
-      resetExtracted,
+      syncGateTokenSet,
+      startOver,
     };
   }, [
     state,
-    setUpload,
-    removeUpload,
     extractInitialMemo,
-    extractUpdateDoc,
-    buildDnaFromCurrentExtraction,
-    generateFollowUp,
-    generateLlmFollowUp,
+    setPeriodOverride,
+    runResearch,
+    generateMemo,
     refreshLlmProviderStatus,
-    clearGeneratedMemo,
-    setMode,
-    resetExtracted,
+    syncGateTokenSet,
+    startOver,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -535,4 +495,27 @@ export function useMemoProject(): MemoProjectContextValue {
     throw new Error("useMemoProject must be used inside <MemoProjectProvider>");
   }
   return ctx;
+}
+
+function renderPeriodLabel(p: {
+  kind: string;
+  isoDate?: string;
+  isoMonth?: string;
+  monthLabel?: string;
+  quarter?: string;
+  fiscalYearLabel?: string;
+  rawMatch: string;
+}): string {
+  switch (p.kind) {
+    case "iso_date":
+      return p.isoDate ?? p.rawMatch;
+    case "month_year":
+      return p.monthLabel ?? p.isoMonth ?? p.rawMatch;
+    case "quarter_fy":
+      return `${p.quarter ?? ""} ${p.fiscalYearLabel ?? ""}`.trim();
+    case "fiscal_year":
+      return p.fiscalYearLabel ?? p.rawMatch;
+    default:
+      return p.rawMatch;
+  }
 }

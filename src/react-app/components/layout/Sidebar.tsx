@@ -1,24 +1,18 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Inbox,
-  Fingerprint,
-  Hammer,
-  FileOutput,
+  LayoutGrid,
   Settings as SettingsIcon,
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 const WORKFLOW = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/intake", label: "Intake", icon: Inbox },
-  { to: "/memo-dna", label: "Memo DNA", icon: Fingerprint },
-  { to: "/builder", label: "Builder", icon: Hammer },
-  { to: "/output", label: "Output", icon: FileOutput },
+  { to: "/workspace", label: "Memo Workspace", icon: LayoutGrid, end: false },
 ];
 
-const SYSTEM = [{ to: "/settings", label: "Settings", icon: SettingsIcon }];
+const SYSTEM = [
+  { to: "/settings", label: "Settings", icon: SettingsIcon, end: false },
+];
 
 export function Sidebar() {
   return (
@@ -31,11 +25,10 @@ export function Sidebar() {
       <div className="mx-3 mb-3 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface-muted)] border border-[var(--color-border)]">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink)]">
           <ShieldCheck className="w-3 h-3" />
-          Phase 1 · Demo
+          Phase 5
         </div>
         <div className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-snug">
-          Mock RateGain data only. Real parsing, LLM generation, and persistence
-          land in Phase 2.
+          Upload an old memo → AI researches what changed → generate a same-style follow-up.
         </div>
       </div>
     </aside>

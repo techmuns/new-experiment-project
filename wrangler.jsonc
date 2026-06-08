@@ -17,50 +17,66 @@
   },
 
   // ---------------------------------------------------------------
-  // Phase 4A/4B/4C/4D: LLM follow-up memo generation.
+  // Phase 4A/4B/4C/4D/5: LLM follow-up memo + OpenAI research.
   //
   // LLM_ENABLED="true" turns on the server-side LLM path. It does
   // NOT by itself authorize anyone to spend provider tokens.
   //
   // LLM_PROVIDER selects the provider implementation:
-  //   "openai"    — default; calls api.openai.com/v1/responses
-  //                 with structured-output json_schema (strict).
+  //   "openai"    — default; calls api.openai.com/v1/responses with
+  //                 strict json_schema. POST /api/research/updates
+  //                 additionally enables the built-in web_search
+  //                 tool for source-grounded research.
   //   "anthropic" — calls api.anthropic.com/v1/messages with
-  //                 tool_use; remains fully supported.
+  //                 tool_use; remains fully supported for the memo
+  //                 generation path. The research endpoint requires
+  //                 OpenAI and returns research_unavailable for
+  //                 other providers.
   // LLM_MODEL is the model id passed to the selected provider
   // (e.g. "gpt-5.2" for OpenAI, "claude-sonnet-4-6" for Anthropic).
   //
-  // LLM_API_KEY MUST match the configured provider:
-  //   - LLM_PROVIDER="openai"    -> set LLM_API_KEY to an OpenAI key
-  //   - LLM_PROVIDER="anthropic" -> set LLM_API_KEY to an Anthropic key
-  // Single env var; the provider decides how to use it.
+  // API key secrets — preferred and fallback:
+  //   wrangler secret put LLM_API_KEY      # preferred (any provider)
+  //   wrangler secret put OPENAI_API_KEY   # fallback, OpenAI ONLY
+  // The Worker prefers LLM_API_KEY when present. When LLM_PROVIDER
+  // is "openai" and LLM_API_KEY is absent, it falls back to
+  // OPENAI_API_KEY so a Cloudflare secret already provisioned under
+  // that name keeps working. Anthropic always reads LLM_API_KEY.
+  // /api/llm/status surfaces apiKeySource as
+  //   "LLM_API_KEY" | "OPENAI_API_KEY" | "none"
+  // so Settings can show which secret is in use without leaking it.
   //
-  // LLM Memo v1 is still NOT ready unless BOTH of these secrets are
-  // set out-of-band against the deployed Worker (never committed):
-  //   wrangler secret put LLM_API_KEY      # provider key
-  //   wrangler secret put LLM_GATE_SECRET  # shared in-app gate token
   // /api/llm/status reports llmReady:true only when all four hold:
-  // LLM_ENABLED="true", provider configured, API key configured,
-  // and (gate disabled OR gate secret configured).
+  // LLM_ENABLED="true", provider configured, API key configured
+  // (either name), and (gate disabled OR gate secret configured).
+  // researchAvailable:true requires the above AND provider="openai".
   //
-  // With LLM_GATE_ENABLED="true" the Worker MUST still reject
-  // /api/generate/follow-up-memo unless the gate secret is set AND
-  // the request carries a valid X-Memo-LLM-Gate header (constant-
-  // time compare in src/worker/llm/provider.ts::checkGateToken).
-  // Rejected requests return HTTP 200 {ok:false, code:
-  // "llm_access_denied"} and short-circuit before any provider
-  // call, so they cost nothing on the provider side. The client
-  // falls back to the deterministic v0 generator.
+  // App-level access gate (LLM_GATE_ENABLED, default "true"):
+  //   Default is "true" because this repo has no real auth, no
+  //   Cloudflare Access config, and no rate limiting. The gate
+  //   prevents anonymous abuse of the provider key while you set
+  //   up real controls. When enabled, generate AND research must
+  //   carry a valid X-Memo-LLM-Gate header (constant-time compare
+  //   in src/worker/llm/provider.ts::checkGateToken). Rejected
+  //   requests return HTTP 200 {ok:false, code:"llm_access_denied"}
+  //   and short-circuit before any provider call, so they cost
+  //   nothing on the provider side.
   //
-  // NO SECRET VALUES ARE COMMITTED. The two `wrangler secret put`
+  //   Operators can set LLM_GATE_ENABLED="false" in this file AFTER
+  //   configuring Cloudflare Access / WAF / IP allowlist / rate
+  //   limiting. That is a deliberate hardening step, out-of-band,
+  //   not a repo default. The main Workspace UI never renders a
+  //   passcode input; Settings exposes the internal token under a
+  //   collapsed "Advanced" section for internal testing.
+  //
+  // NO SECRET VALUES ARE COMMITTED. All `wrangler secret put`
   // commands above are the operator's job; the values must never
   // appear in this file, .dev.vars, .env, or any tracked source.
   //
   // Cloudflare Access / WAF / IP allowlist / rate limiting is
   // RECOMMENDED in the Cloudflare dashboard before any non-internal
-  // use. The shared in-app gate token is a cost-spend deterrent for
-  // uninformed visitors; it is NOT a substitute for real auth or
-  // rate limiting.
+  // use. The shared in-app gate token is a cost-spend deterrent;
+  // it is NOT a substitute for real auth or rate limiting.
   // ---------------------------------------------------------------
   "vars": {
     "LLM_ENABLED": "true",
