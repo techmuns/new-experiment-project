@@ -21,10 +21,13 @@ import type {
   MemoGenerationProgress,
   MemoSection,
   PeriodDetectionResult,
+  ResearchErrorCode,
   ResearchFindings,
   ResearchGenerationState,
-  ResearchUpdatesRequest,
-  ResearchUpdatesResponse,
+  ResearchPassId,
+  ResearchPassResponse,
+  ResearchPassRunState,
+  ResearchProgress,
   SectionRunState,
 } from "@shared/types";
 import { api } from "../lib/api";
@@ -41,6 +44,14 @@ import {
   SECTION_TITLES,
   runSectionGeneration,
 } from "../lib/sectionGeneration";
+import {
+  RESEARCH_PASS_IDS,
+  RESEARCH_PASS_TITLES,
+  buildCompactPassDna,
+  buildCompanyAliases,
+  detectionToResearchDetectionInput,
+  runResearchPasses,
+} from "../lib/researchPasses";
 import { getLlmGateToken } from "../lib/llmGateToken";
 
 const GATE_TOKEN_POLL_KEY = "memo.llm.gate";
@@ -60,6 +71,7 @@ interface State {
   periodOverride: PeriodOverride;
   research: ResearchFindings | null;
   researchState: ResearchGenerationState;
+  researchProgress: ResearchProgress;
   generatedMemo: FollowUpMemo | null;
   llm: LlmGenerationState;
   progress: MemoGenerationProgress;
@@ -81,6 +93,29 @@ type Action =
   | { type: "SET_PERIOD_OVERRIDE"; override: PeriodOverride }
   | { type: "SET_RESEARCH_STATE"; state: ResearchGenerationState }
   | { type: "SET_RESEARCH"; research: ResearchFindings | null }
+  | {
+      type: "START_RESEARCH_RUN";
+      startedAt: string;
+      runPassIds: ResearchPassId[];
+      preserveExistingSuccesses: boolean;
+    }
+  | { type: "RESEARCH_PASS_STARTED"; passId: ResearchPassId; attempt: 1 | 2 }
+  | {
+      type: "RESEARCH_PASS_SUCCESS";
+      passId: ResearchPassId;
+      findingCount: number;
+    }
+  | {
+      type: "RESEARCH_PASS_FAILED";
+      passId: ResearchPassId;
+      code: ResearchErrorCode;
+      message: string;
+    }
+  | {
+      type: "RESEARCH_RUN_TERMINAL";
+      kind: ResearchProgress["kind"];
+      failedPassIds: ResearchPassId[];
+    }
   | { type: "SET_LLM_STATE"; state: LlmGenerationState }
   | { type: "SET_GENERATED_MEMO"; memo: FollowUpMemo | null }
   | { type: "START_GENERATION"; startedAt: string; resumeFromIdx: number }
@@ -111,6 +146,19 @@ function buildInitialProgress(): MemoGenerationProgress {
   };
 }
 
+function buildInitialResearchProgress(): ResearchProgress {
+  return {
+    kind: "idle",
+    passes: RESEARCH_PASS_IDS.map<ResearchPassRunState>((id) => ({
+      id,
+      title: RESEARCH_PASS_TITLES[id],
+      status: "pending",
+      attempt: 0,
+    })),
+    failedPassIds: [],
+  };
+}
+
 const initialState: State = {
   initialFile: null,
   extraction: null,
@@ -120,6 +168,7 @@ const initialState: State = {
   periodOverride: {},
   research: null,
   researchState: { kind: "idle" },
+  researchProgress: buildInitialResearchProgress(),
   generatedMemo: null,
   llm: { kind: "idle" },
   progress: buildInitialProgress(),
@@ -155,6 +204,7 @@ function reducer(state: State, action: Action): State {
         },
         research: null,
         researchState: { kind: "idle" },
+        researchProgress: buildInitialResearchProgress(),
         generatedMemo: null,
         llm: { kind: "idle" },
         progress: buildInitialProgress(),
@@ -169,6 +219,93 @@ function reducer(state: State, action: Action): State {
       return { ...state, researchState: action.state };
     case "SET_RESEARCH":
       return { ...state, research: action.research };
+    case "START_RESEARCH_RUN": {
+      const fresh = buildInitialResearchProgress();
+      const passes = fresh.passes.map<ResearchPassRunState>((row) => {
+        const prev = state.researchProgress.passes.find((p) => p.id === row.id);
+        if (
+          action.preserveExistingSuccesses &&
+          prev &&
+          prev.status === "success" &&
+          !action.runPassIds.includes(row.id)
+        ) {
+          return { ...prev, attempt: 0, errorCode: undefined, errorMessage: undefined };
+        }
+        return row;
+      });
+      return {
+        ...state,
+        researchProgress: {
+          kind: "running",
+          startedAt: action.startedAt,
+          passes,
+          failedPassIds: [],
+        },
+      };
+    }
+    case "RESEARCH_PASS_STARTED": {
+      const passes = state.researchProgress.passes.map<ResearchPassRunState>(
+        (row) =>
+          row.id === action.passId
+            ? {
+                ...row,
+                status: "running",
+                attempt: action.attempt,
+                errorCode: undefined,
+                errorMessage: undefined,
+              }
+            : row,
+      );
+      return {
+        ...state,
+        researchProgress: { ...state.researchProgress, passes },
+      };
+    }
+    case "RESEARCH_PASS_SUCCESS": {
+      const passes = state.researchProgress.passes.map<ResearchPassRunState>(
+        (row) =>
+          row.id === action.passId
+            ? { ...row, status: "success", findingCount: action.findingCount }
+            : row,
+      );
+      return {
+        ...state,
+        researchProgress: { ...state.researchProgress, passes },
+      };
+    }
+    case "RESEARCH_PASS_FAILED": {
+      const passes = state.researchProgress.passes.map<ResearchPassRunState>(
+        (row) =>
+          row.id === action.passId
+            ? {
+                ...row,
+                status: "failed",
+                errorCode: action.code,
+                errorMessage: action.message,
+              }
+            : row,
+      );
+      const failedPassIds = passes
+        .filter((p) => p.status === "failed")
+        .map((p) => p.id);
+      return {
+        ...state,
+        researchProgress: {
+          ...state.researchProgress,
+          passes,
+          failedPassIds,
+        },
+      };
+    }
+    case "RESEARCH_RUN_TERMINAL":
+      return {
+        ...state,
+        researchProgress: {
+          ...state.researchProgress,
+          kind: action.kind,
+          failedPassIds: action.failedPassIds,
+        },
+      };
     case "SET_LLM_STATE":
       return { ...state, llm: action.state };
     case "SET_GENERATED_MEMO":
@@ -267,6 +404,7 @@ function reducer(state: State, action: Action): State {
       return {
         ...initialState,
         progress: buildInitialProgress(),
+        researchProgress: buildInitialResearchProgress(),
         llmProviderStatus: state.llmProviderStatus,
         demoFollowUpMemo: state.demoFollowUpMemo,
         gateTokenSet: state.gateTokenSet,
@@ -286,6 +424,8 @@ interface MemoProjectContextValue {
   extractInitialMemo: (file: File) => Promise<ExtractionResult>;
   setPeriodOverride: (override: PeriodOverride) => void;
   runResearch: () => Promise<void>;
+  retryFailedResearchPasses: () => Promise<void>;
+  retryAllResearch: () => Promise<void>;
   generateMemo: (withResearch: boolean) => Promise<void>;
   retryFailedSection: () => Promise<void>;
   retryFullMemo: () => Promise<void>;
@@ -381,96 +521,159 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const runResearch = useCallback(async (): Promise<void> => {
-    if (!state.dna || !state.extraction || !state.initialFile) return;
-    const periodLabel =
-      state.periodOverride.periodLabel ??
-      (state.detection?.best ? renderPeriodLabel(state.detection.best) : "");
-    if (!periodLabel) return;
+  const perPassResultsRef = useRef<
+    Map<ResearchPassId, ResearchPassResponse & { ok: true }>
+  >(new Map());
 
-    const companyName =
-      state.periodOverride.detectedCompany ??
-      state.detection?.detectedCompany ??
-      state.initialFile.filename.replace(/\.[^.]+$/, "");
+  const runResearchOrchestrated = useCallback(
+    async (mode: "fresh" | "retry_failed"): Promise<void> => {
+      if (!state.dna || !state.extraction || !state.initialFile) return;
+      const periodLabel =
+        state.periodOverride.periodLabel ??
+        (state.detection?.best ? renderPeriodLabel(state.detection.best) : "");
+      if (!periodLabel) return;
 
-    const req: ResearchUpdatesRequest = {
-      project: {
-        id: state.dna.projectId,
+      const companyName =
+        state.periodOverride.detectedCompany ??
+        state.detection?.detectedCompany ??
+        state.initialFile.filename.replace(/\.[^.]+$/, "");
+      const aliases = buildCompanyAliases(
+        state.detection,
+        { ticker: state.dna.projectId, companyName },
+        state.dna,
+      );
+      const compactDna = buildCompactPassDna(state.dna);
+      const baseDetection = detectionToResearchDetectionInput(
+        state.detection,
         companyName,
-      },
-      initialMemo: {
-        id: state.initialFile.id,
-        text: state.extraction.text,
-        sourceFilename: state.extraction.source.filename,
-        sizeBytes: state.extraction.source.sizeBytes,
-      },
-      dna: state.dna,
-      detection: {
-        detectedCompany: companyName,
-        periodLabel,
-        researchStart: state.periodOverride.researchStart,
-        researchCurrent:
-          state.detection?.researchCurrent ??
-          new Date().toISOString().slice(0, 7),
-        assumptionNotes: state.detection?.assumptionNotes ?? [],
-      },
-      thesisCheckpoints: state.dna.thesisCheckpoints,
-    };
+      );
+      baseDetection.detectedCompany = companyName;
+      baseDetection.periodLabel = periodLabel;
+      baseDetection.researchStart = state.periodOverride.researchStart;
 
-    researchAbort.current?.abort();
-    const controller = new AbortController();
-    researchAbort.current = controller;
-    dispatch({ type: "SET_RESEARCH_STATE", state: { kind: "loading" } });
+      const baseRequest = {
+        project: {
+          id: state.dna.projectId,
+          ticker: aliases.ticker,
+          companyName,
+        },
+        companyAliases: aliases,
+        dna: compactDna,
+        detection: baseDetection,
+      };
 
-    let response: ResearchUpdatesResponse | null = null;
-    let networkMessage = "";
-    try {
-      response = await api.researchUpdates(req, controller.signal);
-    } catch (err) {
-      networkMessage = err instanceof Error ? err.message : "Network error";
-    }
-    if (researchAbort.current !== controller) return;
-    researchAbort.current = null;
+      const passesToRun =
+        mode === "retry_failed"
+          ? [...state.researchProgress.failedPassIds]
+          : [...RESEARCH_PASS_IDS];
 
-    if (response && response.ok) {
+      if (mode === "fresh") {
+        perPassResultsRef.current = new Map();
+      }
+
+      researchAbort.current?.abort();
+      const controller = new AbortController();
+      researchAbort.current = controller;
+      dispatch({
+        type: "START_RESEARCH_RUN",
+        startedAt: new Date().toISOString(),
+        runPassIds: passesToRun,
+        preserveExistingSuccesses: mode === "retry_failed",
+      });
+      dispatch({ type: "SET_RESEARCH_STATE", state: { kind: "loading" } });
+
+      const result = await runResearchPasses({
+        baseRequest,
+        thesisCheckpoints: state.dna.thesisCheckpoints,
+        apiCall: (req, signal) => api.researchPass(req, signal),
+        signal: controller.signal,
+        passesToRun,
+        existing: perPassResultsRef.current,
+        onPassStart: (passId, attempt) => {
+          dispatch({ type: "RESEARCH_PASS_STARTED", passId, attempt });
+        },
+        onPassDone: (passId, value) => {
+          perPassResultsRef.current.set(passId, value);
+          dispatch({
+            type: "RESEARCH_PASS_SUCCESS",
+            passId,
+            findingCount: value.findings.length,
+          });
+        },
+        onPassFail: (passId, code, message) => {
+          dispatch({ type: "RESEARCH_PASS_FAILED", passId, code, message });
+        },
+      });
+
+      if (researchAbort.current !== controller) return;
+      researchAbort.current = null;
+
+      if (result.outcome === "aborted") {
+        return;
+      }
+
+      if (result.outcome === "failed") {
+        dispatch({
+          type: "RESEARCH_RUN_TERMINAL",
+          kind: "failed",
+          failedPassIds: result.failedPassIds,
+        });
+        dispatch({
+          type: "SET_RESEARCH_STATE",
+          state: {
+            kind: "error",
+            code: result.code,
+            message: result.message,
+          },
+        });
+        dispatch({ type: "SET_RESEARCH", research: null });
+        return;
+      }
+
+      // complete OR complete_with_warnings — both enable Step 4.
+      dispatch({
+        type: "RESEARCH_RUN_TERMINAL",
+        kind: result.outcome,
+        failedPassIds: result.failedPassIds,
+      });
+      dispatch({ type: "SET_RESEARCH", research: result.research });
       dispatch({
         type: "SET_RESEARCH_STATE",
         state: {
           kind: "success",
-          research: response.research,
-          providerMetadata: response.providerMetadata,
-          warnings: response.warnings,
+          research: result.research,
+          providerMetadata: {
+            providerName: "openai",
+            modelUsed: "gpt-research-pass",
+          },
+          warnings: [],
         },
       });
-      dispatch({ type: "SET_RESEARCH", research: response.research });
-      return;
-    }
-    if (response) {
-      dispatch({
-        type: "SET_RESEARCH_STATE",
-        state: {
-          kind: "error",
-          code: response.code,
-          message: response.message,
-        },
-      });
-      return;
-    }
-    dispatch({
-      type: "SET_RESEARCH_STATE",
-      state: {
-        kind: "error",
-        code: "provider_error",
-        message: networkMessage || "Network error",
-      },
-    });
-  }, [
-    state.dna,
-    state.extraction,
-    state.initialFile,
-    state.detection,
-    state.periodOverride,
-  ]);
+    },
+    [
+      state.dna,
+      state.extraction,
+      state.initialFile,
+      state.detection,
+      state.periodOverride,
+      state.researchProgress.failedPassIds,
+    ],
+  );
+
+  const runResearch = useCallback(
+    (): Promise<void> => runResearchOrchestrated("fresh"),
+    [runResearchOrchestrated],
+  );
+
+  const retryFailedResearchPasses = useCallback(
+    (): Promise<void> => runResearchOrchestrated("retry_failed"),
+    [runResearchOrchestrated],
+  );
+
+  const retryAllResearch = useCallback(
+    (): Promise<void> => runResearchOrchestrated("fresh"),
+    [runResearchOrchestrated],
+  );
 
   const runOrchestratedGeneration = useCallback(
     async (
@@ -646,6 +849,8 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
       extractInitialMemo,
       setPeriodOverride,
       runResearch,
+      retryFailedResearchPasses,
+      retryAllResearch,
       generateMemo,
       retryFailedSection,
       retryFullMemo,
@@ -658,6 +863,8 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     extractInitialMemo,
     setPeriodOverride,
     runResearch,
+    retryFailedResearchPasses,
+    retryAllResearch,
     generateMemo,
     retryFailedSection,
     retryFullMemo,

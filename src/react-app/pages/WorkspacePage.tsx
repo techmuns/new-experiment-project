@@ -12,7 +12,10 @@ import {
   Sparkles,
   UploadCloud,
 } from "lucide-react";
-import type { SectionRunState } from "@shared/types";
+import type {
+  ResearchPassRunState,
+  SectionRunState,
+} from "@shared/types";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Panel } from "../components/ui/Panel";
@@ -30,6 +33,8 @@ export function WorkspacePage() {
     state,
     extractInitialMemo,
     runResearch,
+    retryFailedResearchPasses,
+    retryAllResearch,
     generateMemo,
     retryFailedSection,
     retryFullMemo,
@@ -138,7 +143,11 @@ export function WorkspacePage() {
           eyebrow="Step 3"
           title="Research latest developments"
           actions={
-            researchSuccess ? (
+            state.researchProgress.kind === "complete_with_warnings" ? (
+              <Badge tone="warning" dot>
+                Research complete with warnings
+              </Badge>
+            ) : researchSuccess ? (
               <Badge tone="success" dot>
                 Research complete
               </Badge>
@@ -193,10 +202,36 @@ export function WorkspacePage() {
             </div>
           )}
 
+          {(researchLoading ||
+            state.researchProgress.kind === "complete_with_warnings" ||
+            researchError) &&
+            state.researchProgress.passes.some(
+              (p) => p.status !== "pending",
+            ) && (
+              <ResearchProgressList passes={state.researchProgress.passes} />
+            )}
+
+          {state.researchProgress.kind === "complete_with_warnings" &&
+            !researchError && (
+              <ResearchWarningsBanner
+                passes={state.researchProgress.passes}
+                onRetryFailed={() => void retryFailedResearchPasses()}
+                disabled={researchLoading}
+              />
+            )}
+
           {researchError && (
-            <ErrorBanner
+            <ResearchFailureBanner
               code={researchError.code}
               message={researchError.message}
+              hasFailedPasses={
+                state.researchProgress.failedPassIds.length > 0 &&
+                state.researchProgress.failedPassIds.length <
+                  state.researchProgress.passes.length
+              }
+              onRetryFailed={() => void retryFailedResearchPasses()}
+              onRetryAll={() => void retryAllResearch()}
+              disabled={researchLoading}
             />
           )}
         </Panel>
@@ -328,17 +363,158 @@ function SetupRequiredPanel({
   );
 }
 
-function ErrorBanner({ code, message }: { code: string; message: string }) {
+// Phase 5E: 6-row per-pass research progress list. Shown while research is
+// running, after partial-success ("complete_with_warnings"), and after
+// hard failure so the user can see exactly which passes completed, failed,
+// or were skipped.
+function ResearchProgressList({ passes }: { passes: ResearchPassRunState[] }) {
+  const total = passes.length;
+  const completed = passes.filter((p) => p.status === "success").length;
+  const running = passes.find((p) => p.status === "running");
+  const failed = passes.filter((p) => p.status === "failed");
+  const headline = running
+    ? `Researching pass ${passes.indexOf(running) + 1} of ${total} — ${running.title}`
+    : failed.length > 0
+      ? `${completed} of ${total} passes complete · ${failed.length} failed`
+      : `${completed} of ${total} passes complete`;
   return (
-    <div className="mt-4 rounded-[var(--radius-md)] border border-[color-mix(in_srgb,var(--color-warning)_22%,white)] bg-[var(--color-warning-soft)] px-3 py-2.5 flex items-start gap-2">
-      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-[var(--color-warning)]" />
-      <div className="min-w-0 flex-1">
-        <div className="text-[12.5px] font-semibold text-[var(--color-warning)]">
-          {code}
+    <div className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
+      <div className="text-[12.5px] font-semibold text-[var(--color-text)] mb-2">
+        {headline}
+      </div>
+      <ol className="space-y-1.5">
+        {passes.map((p, i) => (
+          <li
+            key={p.id}
+            className="flex items-center gap-2 text-[12px] text-[var(--color-text)]"
+          >
+            <span className="w-4 inline-flex justify-center">
+              {p.status === "success" ? (
+                <Check className="w-3.5 h-3.5 text-[var(--color-success)]" />
+              ) : p.status === "running" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-ink)]" />
+              ) : p.status === "failed" ? (
+                <AlertCircle className="w-3.5 h-3.5 text-[var(--color-warning)]" />
+              ) : (
+                <Circle className="w-3 h-3 text-[var(--color-text-subtle)]" />
+              )}
+            </span>
+            <span className="tnum w-5 text-right text-[var(--color-text-subtle)]">
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <span
+              className={
+                p.status === "pending"
+                  ? "text-[var(--color-text-subtle)]"
+                  : ""
+              }
+            >
+              {p.title}
+            </span>
+            {p.status === "success" && typeof p.findingCount === "number" && (
+              <span className="text-[10.5px] text-[var(--color-text-subtle)]">
+                · {p.findingCount} finding{p.findingCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {p.status === "running" && p.attempt === 2 && (
+              <span className="text-[10.5px] text-[var(--color-text-subtle)]">
+                · retrying (compact)
+              </span>
+            )}
+            {p.status === "failed" && p.errorCode && (
+              <span className="text-[10.5px] text-[var(--color-warning)]">
+                · {p.errorCode}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ResearchWarningsBanner({
+  passes,
+  onRetryFailed,
+  disabled,
+}: {
+  passes: ResearchPassRunState[];
+  onRetryFailed: () => void;
+  disabled: boolean;
+}) {
+  const failed = passes.filter((p) => p.status === "failed");
+  if (failed.length === 0) return null;
+  const titles = failed.map((p) => p.title).join(", ");
+  return (
+    <div className="mt-4 rounded-[var(--radius-md)] border border-[color-mix(in_srgb,var(--color-warning)_22%,white)] bg-[var(--color-warning-soft)] px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-semibold text-[var(--color-warning)] leading-snug">
+            Research complete with warnings — {failed.length} of {passes.length} passes failed.
+          </div>
+          <p className="text-[11.5px] text-[var(--color-warning)] mt-1 leading-snug">
+            Failed: {titles}. Memo generation is enabled and will use the
+            passes that succeeded. Retry the failed passes below to top up
+            coverage.
+          </p>
         </div>
-        <p className="text-[12px] text-[var(--color-warning)] mt-0.5 leading-relaxed">
-          {message}
-        </p>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onRetryFailed} disabled={disabled}>
+          Retry failed research passes
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ResearchFailureBanner({
+  code,
+  message,
+  hasFailedPasses,
+  onRetryFailed,
+  onRetryAll,
+  disabled,
+}: {
+  code: string;
+  message: string;
+  hasFailedPasses: boolean;
+  onRetryFailed: () => void;
+  onRetryAll: () => void;
+  disabled: boolean;
+}) {
+  const headline =
+    code === "research_no_sources"
+      ? "Research failed — no verified sources were returned across the run."
+      : "Research failed.";
+  return (
+    <div className="mt-4 rounded-[var(--radius-md)] border border-[color-mix(in_srgb,var(--color-warning)_22%,white)] bg-[var(--color-warning-soft)] px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-semibold text-[var(--color-warning)] leading-snug">
+            {headline}
+          </div>
+          <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-snug font-mono">
+            {code} · {message}
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {hasFailedPasses && (
+          <Button size="sm" onClick={onRetryFailed} disabled={disabled}>
+            Retry failed research passes
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant={hasFailedPasses ? "outline" : "primary"}
+          onClick={onRetryAll}
+          disabled={disabled}
+        >
+          Retry all research
+        </Button>
       </div>
     </div>
   );

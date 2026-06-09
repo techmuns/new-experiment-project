@@ -633,3 +633,110 @@ export interface MemoGenerationProgress {
   completedCount: number;
   failedSectionId?: CanonicalSectionId;
 }
+
+// ---------- Phase 5E additions: multi-pass research ----------
+
+export type ResearchPassId =
+  | "official_results"
+  | "management_call"
+  | "investor_presentation"
+  | "press_and_results"
+  | "valuation_market"
+  | "risks_competition";
+
+export interface ResearchPassCompanyAliases {
+  longName: string;
+  shortName?: string;
+  informalName?: string;
+  ticker?: string;
+  exchangeTicker?: string;
+  exchangeTickerAlt?: string;
+  ric?: string;
+}
+
+export interface ResearchPassCompactDna {
+  projectId: string;
+  originalThesisHead: string;
+  keyAssumptions: string[];
+  toneAdjectives: string[];
+  analyticalFramework: string[];
+  valuationFramework: {
+    method: string;
+    targetMultiple: string;
+    bridgeNotes: string[];
+  };
+  thesisCheckpoints: Array<{
+    id: string;
+    label: string;
+    expectedDirection: "up" | "down" | "flat";
+  }>;
+}
+
+export interface ResearchPassRequest {
+  passId: ResearchPassId;
+  project: {
+    id: string;
+    ticker?: string;
+    companyName: string;
+    sector?: string;
+  };
+  companyAliases: ResearchPassCompanyAliases;
+  dna: ResearchPassCompactDna;
+  detection: ResearchDetectionInput;
+  thesisCheckpoints?: ThesisCheckpoint[];
+  retryCompact?: boolean;
+}
+
+export interface ResearchPassHarvestedUrl {
+  url: string;
+  title?: string;
+  date?: string;
+}
+
+export type ResearchPassResponse =
+  | {
+      ok: true;
+      passId: ResearchPassId;
+      findings: ResearchFinding[];
+      harvestedUrls: ResearchPassHarvestedUrl[];
+      unresolvedQuestions: string[];
+      warnings: LlmGenerationWarning[];
+      providerMetadata: LlmProviderMetadata;
+    }
+  | {
+      ok: false;
+      passId: ResearchPassId;
+      code: ResearchErrorCode;
+      message: string;
+      providerName?: LlmProviderName;
+      modelUsed?: string;
+    };
+
+export type ResearchPassStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "failed"
+  | "skipped";
+
+export interface ResearchPassRunState {
+  id: ResearchPassId;
+  title: string;
+  status: ResearchPassStatus;
+  attempt: 0 | 1 | 2;
+  errorCode?: ResearchErrorCode;
+  errorMessage?: string;
+  findingCount?: number;
+}
+
+export interface ResearchProgress {
+  kind:
+    | "idle"
+    | "running"
+    | "complete"
+    | "complete_with_warnings"
+    | "failed";
+  startedAt?: string;
+  passes: ResearchPassRunState[];
+  failedPassIds: ResearchPassId[];
+}

@@ -8,6 +8,8 @@ import type {
   LlmStatusResponse,
   MemoDNA,
   MemoProject,
+  ResearchPassRequest,
+  ResearchPassResponse,
   ResearchUpdatesRequest,
   ResearchUpdatesResponse,
 } from "@shared/types";
@@ -91,6 +93,18 @@ export const api = {
   ) =>
     postJson<ResearchUpdatesResponse, ResearchUpdatesRequest>(
       "/api/research/updates",
+      req,
+      {
+        signal,
+        headers: gateHeader(),
+      },
+    ),
+  researchPass: (
+    req: ResearchPassRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJson<ResearchPassResponse, ResearchPassRequest>(
+      "/api/research/pass",
       req,
       {
         signal,

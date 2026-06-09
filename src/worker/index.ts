@@ -47,6 +47,7 @@ import {
 } from "./llm/parse";
 import { trimRequestBody, trimRequestBodyCompact } from "./llm/trim";
 import { handleResearchUpdates } from "./research/route";
+import { handleResearchPass } from "./research/passRoute";
 import {
   CANONICAL_SECTION_IDS,
   buildSectionPrompt,
@@ -112,6 +113,7 @@ app.get("/api/llm/status", (c) => {
 });
 
 app.post("/api/research/updates", (c) => handleResearchUpdates(c));
+app.post("/api/research/pass", (c) => handleResearchPass(c));
 
 app.post("/api/generate/follow-up-memo", async (c) => {
   const declaredLength = Number(c.req.header("content-length") ?? "0");
