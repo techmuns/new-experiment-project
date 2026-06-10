@@ -42,12 +42,26 @@ export function UploadSlot({
     return (
       <div
         className={cn(
-          "relative rounded-[var(--radius-xl)] border-2 border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)] p-7 flex flex-col gap-5 transition-colors",
+          // Phase 5I: subtle gradient when empty; settled solid + shadow
+          // bump when a file is loaded. Hover ring only when empty.
+          "relative rounded-[var(--radius-xl)] border-2 border-dashed p-7 flex flex-col gap-5 transition-shadow transition-colors",
           isReal
-            ? "border-[var(--color-ink)] bg-[var(--color-ink-soft)]/40"
-            : "hover:border-[var(--color-ink)]",
+            ? "border-[var(--color-ink)] bg-[var(--color-ink-soft)]/40 shadow-[var(--shadow-md)]"
+            : "border-[var(--color-border-strong)] bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-ink-soft)]/60 shadow-[var(--shadow-sm)] hover:border-[var(--color-ink)] hover:ring-2 hover:ring-[var(--color-ink)]/15",
         )}
       >
+        {isReal && (
+          <div className="absolute -top-2.5 left-5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-[color-mix(in_srgb,var(--color-success)_28%,white)] bg-[var(--color-success-soft)] text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-success)]">
+            <CheckCircle2 className="w-3 h-3" strokeWidth={2.5} />
+            Memo loaded
+            {currentFile && (
+              <span className="font-medium text-[var(--color-success)]/80 normal-case tracking-normal">
+                · {formatBytes(currentFile.sizeBytes)}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-[var(--radius-md)] bg-[var(--color-ink)] text-white grid place-items-center shrink-0 shadow-[var(--shadow-sm)]">
             {Icon ? <Icon className="w-5 h-5" /> : <Upload className="w-5 h-5" />}
@@ -73,11 +87,24 @@ export function UploadSlot({
           className="flex items-center justify-center gap-2 h-12 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-muted)] text-[13px] font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-ink-soft)] hover:text-[var(--color-ink)] hover:border-[var(--color-ink)] transition-colors"
         >
           <Upload className="w-4 h-4" />
-          {isReal ? "Replace file" : "Drop file or click to select"}
-          <span className="text-[var(--color-text-subtle)] font-normal">
-            · .txt · .md · .pdf
-          </span>
+          {isReal ? "Replace file" : "Drop memo to begin"}
         </button>
+
+        {!isReal && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-subtle)] mr-1">
+              Supports
+            </span>
+            {[".txt", ".md", ".pdf"].map((ext) => (
+              <span
+                key={ext}
+                className="inline-flex items-center h-5 px-1.5 rounded text-[10.5px] font-mono text-[var(--color-text-muted)] bg-[var(--color-surface)] border border-[var(--color-border)]"
+              >
+                {ext}
+              </span>
+            ))}
+          </div>
+        )}
 
         <input
           ref={inputRef}
@@ -90,7 +117,7 @@ export function UploadSlot({
         {displayName && (
           <div
             className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] border",
+              "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] border transition-opacity",
               isReal
                 ? "bg-[var(--color-surface)] border-[var(--color-ink)]"
                 : "bg-[var(--color-surface-muted)] border-[var(--color-border)]",

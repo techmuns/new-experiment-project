@@ -17,14 +17,18 @@ import type {
 } from "@shared/types";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { Hero } from "../components/ui/Hero";
 import { Panel } from "../components/ui/Panel";
-import { SectionHeader } from "../components/ui/SectionHeader";
 import { UploadSlot } from "../components/ui/UploadSlot";
 import { ExtractionPreview } from "../components/ui/ExtractionPreview";
 import { PrivacyDisclosure } from "../components/PrivacyDisclosure";
 import { PeriodPanel } from "../components/PeriodPanel";
 import { ResearchFindingsCard } from "../components/ResearchFindingsCard";
 import { MemoReview } from "../components/MemoReview";
+import { MemoMissionTracker } from "../components/MemoMissionTracker";
+import { ReadinessStrip } from "../components/ReadinessStrip";
+import { MemoCompletionBanner } from "../components/MemoCompletionBanner";
+import { deriveMissionTrackerSteps } from "../lib/missionTrackerState";
 import { useMemoProject } from "../state/MemoProjectContext";
 
 export function WorkspacePage() {
@@ -47,35 +51,6 @@ export function WorkspacePage() {
   const gateBlocking = gateEnabled && !state.gateTokenSet;
   const canCall = llmReady && !gateBlocking;
 
-  const headerChip = (() => {
-    if (canCall && researchAvailable) {
-      return (
-        <Badge tone="success" dot>
-          OpenAI ready
-        </Badge>
-      );
-    }
-    if (gateBlocking) {
-      return (
-        <Badge tone="warning" dot>
-          Setup needed · gate locked
-        </Badge>
-      );
-    }
-    if (!llmReady) {
-      return (
-        <Badge tone="warning" dot>
-          Setup needed
-        </Badge>
-      );
-    }
-    return (
-      <Badge tone="neutral" dot>
-        Demo only
-      </Badge>
-    );
-  })();
-
   const onFile = async (file: File) => {
     await extractInitialMemo(file);
   };
@@ -97,13 +72,55 @@ export function WorkspacePage() {
     return undefined;
   }, [state.research]);
 
+  const missionSteps = useMemo(
+    () =>
+      deriveMissionTrackerSteps({
+        initialFile: state.initialFile,
+        extractionStatus: state.extractionStatus,
+        dna: state.dna,
+        research: state.research,
+        researchState: state.researchState,
+        generatedMemo: state.generatedMemo,
+        llm: state.llm,
+      }),
+    [
+      state.initialFile,
+      state.extractionStatus,
+      state.dna,
+      state.research,
+      state.researchState,
+      state.generatedMemo,
+      state.llm,
+    ],
+  );
+
+  const showIntroHero = state.initialFile === null;
+
   return (
     <div className="space-y-6">
-      <SectionHeader
-        eyebrow="Memo workspace"
-        title="Memo Updater"
-        description="Upload an old investment memo. AI researches what changed and drafts a same-style follow-up memo."
-        actions={headerChip}
+      {/* Pre-upload intro — disappears once a file is loaded so the rest
+          of the workflow rises above the fold. */}
+      {showIntroHero && (
+        <Hero
+          eyebrow="Memo workbench"
+          title="Turn an old investment memo into a current follow-up note."
+        />
+      )}
+
+      {/* Workflow progress rail — always visible, derived from existing context. */}
+      <MemoMissionTracker steps={missionSteps} />
+
+      {/* Workbench readiness — always visible, derived from existing context. */}
+      <ReadinessStrip
+        llmProviderStatus={state.llmProviderStatus}
+        gateBlocking={gateBlocking}
+        extraction={state.extraction}
+        research={state.research}
+        researchState={state.researchState}
+        researchProgress={state.researchProgress}
+        generatedMemo={state.generatedMemo}
+        llm={state.llm}
+        memoProgress={state.progress}
       />
 
       {/* Step 1 — Upload */}
@@ -300,11 +317,17 @@ export function WorkspacePage() {
 
       {/* Step 5 — Review */}
       {memoSuccess && (
-        <MemoReview
-          memo={memoSuccess.memo}
-          generationType="openai"
-          researchWindowLabel={researchWindowLabel}
-        />
+        <>
+          <MemoCompletionBanner
+            memo={memoSuccess.memo}
+            research={state.research}
+          />
+          <MemoReview
+            memo={memoSuccess.memo}
+            generationType="openai"
+            researchWindowLabel={researchWindowLabel}
+          />
+        </>
       )}
 
       {/* Post-memo: the memo is the primary output. The research card moves
