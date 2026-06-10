@@ -1,5 +1,11 @@
-import { useNavigate } from "react-router-dom";
-import { ChevronRight, Plus, Cloud, CircleUser } from "lucide-react";
+import { NavLink, useNavigate } from "react-router-dom";
+import {
+  ChevronRight,
+  Plus,
+  Cloud,
+  CircleUser,
+  Settings as SettingsIcon,
+} from "lucide-react";
 import { Button } from "../ui/Button";
 import { useMemoProject } from "../../state/MemoProjectContext";
 import { deriveCommandBarValues } from "./commandBarState";
@@ -31,7 +37,11 @@ export function CommandBar() {
   return (
     <header className="h-14 shrink-0 sticky top-0 z-30 bg-[var(--color-surface)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-surface)]/80 border-b border-[var(--color-border)]">
       <div className="h-full px-5 flex items-center gap-3">
-        <div className="flex items-center gap-2 pr-3 mr-1 border-r border-[var(--color-border)] h-8">
+        <NavLink
+          to="/workspace"
+          className="flex items-center gap-2 pr-3 mr-1 border-r border-[var(--color-border)] h-8 rounded-[var(--radius-md)] hover:opacity-80 transition-opacity"
+          aria-label="Memo Updater home"
+        >
           <div className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-ink)] text-white grid place-items-center text-[11px] font-bold tracking-tight">
             M
           </div>
@@ -43,7 +53,7 @@ export function CommandBar() {
               Buy-side cockpit
             </div>
           </div>
-        </div>
+        </NavLink>
 
         <CommandChip
           label="Project"
@@ -66,6 +76,20 @@ export function CommandBar() {
           >
             New Memo Update
           </Button>
+          <NavLink
+            to="/settings"
+            aria-label="Settings"
+            className={({ isActive }) =>
+              `inline-flex items-center gap-1.5 h-7 px-2.5 text-[12px] font-medium rounded-[var(--radius-md)] transition-colors ${
+                isActive
+                  ? "bg-[var(--color-ink-soft)] text-[var(--color-ink)] font-semibold"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
+              }`
+            }
+          >
+            <SettingsIcon className="w-4 h-4" />
+            <span className="hidden sm:inline">Settings</span>
+          </NavLink>
           <div className="flex items-center gap-1.5 pl-3 ml-1 border-l border-[var(--color-border)] h-7 text-[12px] text-[var(--color-text-muted)]">
             <CircleUser className="w-4 h-4" />
             <span>tech@muns.io</span>

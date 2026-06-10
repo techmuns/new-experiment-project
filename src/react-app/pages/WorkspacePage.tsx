@@ -8,7 +8,6 @@ import {
   Loader2,
   Lock,
   RefreshCw,
-  Settings as SettingsIcon,
   Sparkles,
   UploadCloud,
 } from "lucide-react";
@@ -104,18 +103,7 @@ export function WorkspacePage() {
         eyebrow="Memo workspace"
         title="Memo Updater"
         description="Upload an old investment memo. AI researches what changed and drafts a same-style follow-up memo."
-        actions={
-          <>
-            {headerChip}
-            <Link
-              to="/settings"
-              className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[12px] font-medium rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-muted)] transition-colors"
-            >
-              <SettingsIcon className="w-4 h-4" />
-              Settings
-            </Link>
-          </>
-        }
+        actions={headerChip}
       />
 
       {/* Step 1 — Upload */}
