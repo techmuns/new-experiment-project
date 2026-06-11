@@ -12,39 +12,39 @@ interface MemoPreviewSection {
 const SECTIONS: MemoPreviewSection[] = [
   {
     index: 1,
-    title: "Original Thesis Snapshot",
+    title: "Memo vs Reality Scorecard",
     teaser:
-      "MarTech mix shift drags ARR quality up; Rule of 40 is the single number to track.",
+      "Stock +16% in 25 months vs the memo's +43% base case; ~100% of return from earnings, multiple de-rated ~13%.",
   },
   {
     index: 2,
-    title: "Q4 Financial Re-test",
+    title: "What Changed — Industry · Company · Financials",
     teaser:
-      "Revenue +21%, ARR +24%, EBITDA margin 19.4% — on track. NRR 108% misses the 110% checkpoint.",
+      "AI overhang; Sojern transforms the security to debt-funded integration story; revenue beat, margin missed.",
   },
   {
     index: 3,
-    title: "Management Commentary",
+    title: "Shareholding & Ownership Changes",
     teaser:
-      "Chain-level cross-sell landing in 3 named accounts; CFO floats 'capital return framework'.",
+      "Promoter stable ~48.8%; FII -5 ppt over 2 years; DII and retail picked up the slack — domestic tilt.",
   },
   {
     index: 4,
-    title: "AI / Macro Risk",
+    title: "Industry & Regulatory Developments",
     teaser:
-      "OTA-side LLM compression carves out B2B hotel distribution; RevPAR +3%, INR neutral.",
+      "Generative-AI travel search is the defining structural risk; data-privacy regime is a net positive for owned intent data.",
   },
   {
     index: 5,
-    title: "Valuation & Peer Gap",
+    title: "Corporate Events (Last 12 Months)",
     teaser:
-      "Fair value INR 792 base / INR 1,125 bull; rich on snapshot, cheap on ARR-growth differential.",
+      "Sojern close (Nov-2025), FY26 results (revenue beat, PAT down), CFO resignation (May-2026, second in two years).",
   },
   {
     index: 6,
-    title: "Final Investment Action",
+    title: "Updated Investment View",
     teaser:
-      "Hold at 3% weight. Add on NRR ≥110% or first buyback authorization. Trim on NRR <105%.",
+      "MIXED BUT MONITORABLE — Hold; add on margin recovery + permanent CFO + quantified synergies.",
   },
 ];
 
@@ -70,7 +70,7 @@ export function MemoPreview() {
           Demo generated
         </Badge>
         <span className="text-[11px] text-[var(--color-text-muted)]">
-          9 sections · serif memo reader · sources audit rail
+          6 client-priority sections · target &lt;3 pages · supplementary valuation panels
         </span>
       </div>
 

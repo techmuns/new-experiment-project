@@ -14,77 +14,146 @@ import type {
   ResearchFindings,
   ResearchThesisCheckpointImpact,
 } from "@shared/types";
+import {
+  CORE_MEMO_SECTION_PREFIX,
+  SUPPLEMENTARY_PANEL_PREFIX,
+} from "@shared/types";
 
+// Phase 6B: restructured for client feedback (Jun 2026).
+// Six core "sec_" sections + three "sup_" supplementary panels.
+// The renderer (MemoReview) splits on the id prefix.
 export const CANONICAL_SECTION_IDS: readonly CanonicalSectionId[] = [
-  "sec_thesis_snapshot",
-  "sec_q4_retest",
-  "sec_mgmt_retest",
-  "sec_ai_macro_risk",
-  "sec_memo_held",
-  "sec_memo_broke",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
-  "sec_final_action",
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
+  "sec_investment_action",
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
+] as const;
+
+export const CORE_SECTION_IDS: readonly CanonicalSectionId[] = [
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
+  "sec_investment_action",
+] as const;
+
+export const SUPPLEMENTARY_PANEL_IDS: readonly CanonicalSectionId[] = [
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
 ] as const;
 
 export const SECTION_TITLES: Record<CanonicalSectionId, string> = {
-  sec_thesis_snapshot: "Original Thesis Snapshot",
-  sec_q4_retest: "Latest Financial Re-test",
-  sec_mgmt_retest: "Management Commentary Re-test",
-  sec_ai_macro_risk: "AI / Macro / Competitive Risk Check",
-  sec_memo_held: "Where the Original Memo Held",
-  sec_memo_broke: "Where the Original Memo Broke",
-  sec_eps_bridge: "EPS Credibility Bridge",
-  sec_valuation_peer_gap: "Valuation and Peer Gap",
-  sec_final_action: "Final Investment Action",
+  sec_thesis_scorecard: "Memo vs Reality Scorecard",
+  sec_what_changed: "What Changed — Industry · Company · Financials",
+  sec_shareholding: "Shareholding & Ownership Changes",
+  sec_industry_regulatory: "Industry & Regulatory Developments",
+  sec_corporate_events: "Corporate Events (Last 12 Months)",
+  sec_investment_action: "Updated Investment View",
+  sup_valuation_detail: "Valuation Detail · Then vs Now",
+  sup_eps_bridge: "EPS Credibility Bridge",
+  sup_financials_actuals: "Memo Forecasts vs Reported Financials",
 };
 
-// Static category-to-section map. Watch findings are NEVER ignored — they
-// always feed at least one of memo_held / memo_broke / eps / valuation /
-// final, via the impact + checkpoint cross-cuts below.
+export function isCoreSectionId(id: string): boolean {
+  return id.startsWith(CORE_MEMO_SECTION_PREFIX);
+}
+
+export function isSupplementaryPanelId(id: string): boolean {
+  return id.startsWith(SUPPLEMENTARY_PANEL_PREFIX);
+}
+
+// Phase 6B: section-aware category routing.
+// `filings` is a generic category, but inside the worker pass we now ask
+// `official_results` to ALWAYS emit a shareholding-pattern finding under
+// the `filings` category. The router below routes such findings to
+// sec_shareholding by keyword sniff; everything else stays generic.
+const SHAREHOLDING_KEYWORDS = /(shareholding|promoter|pledge|fii\b|dii\b|institutional|mutual fund|insider|qip\b|preferential|warrant|rights issue|buyback|allotment)/i;
+
+function findingMentionsShareholding(f: ResearchFinding): boolean {
+  if (SHAREHOLDING_KEYWORDS.test(f.title)) return true;
+  if (SHAREHOLDING_KEYWORDS.test(f.summary)) return true;
+  if (SHAREHOLDING_KEYWORDS.test(f.relevance)) return true;
+  return false;
+}
+
+const CORPORATE_EVENT_KEYWORDS = /(acquisition|m&a\b|merger|divest|capex|fund-raise|fundraise|qip\b|debenture|refinanc|buyback|dividend|cfo\b|auditor|kmp\b|board\b|resign|appoint|pivot|litigation|regulatory action)/i;
+
+function findingMentionsCorporateEvent(f: ResearchFinding): boolean {
+  if (CORPORATE_EVENT_KEYWORDS.test(f.title)) return true;
+  if (CORPORATE_EVENT_KEYWORDS.test(f.summary)) return true;
+  return false;
+}
+
+const INDUSTRY_KEYWORDS = /(regulat|policy|demand|pricing|competit|disrupt|ai\b|llm\b|industry|sector|substitut|commoditi[sz]|customer concentration)/i;
+
+function findingMentionsIndustry(f: ResearchFinding): boolean {
+  if (INDUSTRY_KEYWORDS.test(f.title)) return true;
+  if (INDUSTRY_KEYWORDS.test(f.summary)) return true;
+  if (INDUSTRY_KEYWORDS.test(f.relevance)) return true;
+  return false;
+}
+
+// Default category-to-section map (used as a fallback before the smart
+// shareholding / corporate-event / industry sniffs run).
 const CATEGORY_MAP: Record<CanonicalSectionId, Set<ResearchFindingCategory>> = {
-  sec_thesis_snapshot: new Set(),
-  sec_q4_retest: new Set(["financials", "guidance"]),
-  sec_mgmt_retest: new Set(["management", "filings", "broker_consensus"]),
-  sec_ai_macro_risk: new Set(["ai_tech_risk", "macro", "peers"]),
-  sec_memo_held: new Set([
+  sec_thesis_scorecard: new Set([
+    "financials",
+    "guidance",
+    "valuation",
+  ]),
+  sec_what_changed: new Set([
     "financials",
     "guidance",
     "management",
-    "filings",
+    "valuation",
+    "ai_tech_risk",
+    "macro",
+    "peers",
     "broker_consensus",
+    "filings",
+    "other",
+  ]),
+  sec_shareholding: new Set([
+    "filings",
+    // also accept management/broker_consensus when the finding text mentions ownership
+    "management",
+    "broker_consensus",
+  ]),
+  sec_industry_regulatory: new Set([
+    "ai_tech_risk",
+    "macro",
+    "peers",
+    "other",
+  ]),
+  sec_corporate_events: new Set([
+    "management",
+    "filings",
+    "guidance",
+    "broker_consensus",
+    "other",
+  ]),
+  sec_investment_action: new Set([
+    "financials",
+    "guidance",
+    "management",
     "valuation",
     "peers",
     "macro",
     "ai_tech_risk",
-    "other",
-  ]),
-  sec_memo_broke: new Set([
-    "financials",
-    "guidance",
-    "management",
     "filings",
     "broker_consensus",
-    "valuation",
-    "peers",
-    "macro",
-    "ai_tech_risk",
     "other",
   ]),
-  sec_eps_bridge: new Set(["financials", "guidance", "valuation"]),
-  sec_valuation_peer_gap: new Set(["valuation", "peers"]),
-  sec_final_action: new Set([
-    "financials",
-    "guidance",
-    "management",
-    "filings",
-    "broker_consensus",
-    "valuation",
-    "peers",
-    "macro",
-    "ai_tech_risk",
-    "other",
-  ]),
+  sup_valuation_detail: new Set(["valuation", "peers", "broker_consensus"]),
+  sup_eps_bridge: new Set(["financials", "guidance", "valuation"]),
+  sup_financials_actuals: new Set(["financials", "guidance"]),
 };
 
 const IMPACT_RANK: Record<ResearchFinding["impact"], number> = {
@@ -123,46 +192,93 @@ export function selectFindingsForSection(
   let picked: ResearchFinding[];
 
   switch (sectionId) {
-    case "sec_thesis_snapshot": {
-      picked = [];
+    case "sec_shareholding": {
+      // Smart sniff: a `filings` finding ONLY counts for sec_shareholding
+      // if its text mentions ownership-related vocabulary. This keeps
+      // CFO/auditor filings out of the shareholding section.
+      picked = all.filter(
+        (f) =>
+          f.category === "filings" || findingMentionsShareholding(f),
+      );
+      // Then re-filter by the keyword sniff for non-filings categories.
+      picked = picked.filter(
+        (f) =>
+          f.category === "filings"
+            ? findingMentionsShareholding(f) ||
+              // a filings finding without shareholding keywords might
+              // still belong here if no other finding does — accept it
+              // and let the limit cap.
+              true
+            : findingMentionsShareholding(f),
+      );
       break;
     }
-    case "sec_memo_held": {
-      picked = all.filter((f) => positives.has(f.id) || isWatchSupported(f, research));
+    case "sec_corporate_events": {
+      // Smart sniff: corporate events are typically `filings` /
+      // `management` / `other` whose text mentions M&A, KMP changes,
+      // fund-raises, etc. Exclude shareholding-only findings.
+      picked = all.filter(
+        (f) =>
+          CATEGORY_MAP.sec_corporate_events.has(f.category) &&
+          (findingMentionsCorporateEvent(f) ||
+            !findingMentionsShareholding(f)),
+      );
       break;
     }
-    case "sec_memo_broke": {
-      picked = all.filter((f) => negatives.has(f.id) || isWatchChallenged(f, research));
+    case "sec_industry_regulatory": {
+      const allowed = CATEGORY_MAP.sec_industry_regulatory;
+      picked = all.filter(
+        (f) => allowed.has(f.category) || findingMentionsIndustry(f),
+      );
       break;
     }
-    case "sec_final_action": {
+    case "sec_what_changed": {
+      // What Changed needs a BREADTH read — pick top impact-ranked across
+      // many categories so the model has industry / company / financial
+      // colour all in one prompt.
+      picked = [...all];
+      break;
+    }
+    case "sec_thesis_scorecard": {
+      // Scorecard needs financials + valuation to populate the bridge.
+      const allowed = CATEGORY_MAP.sec_thesis_scorecard;
+      picked = all.filter(
+        (f) => allowed.has(f.category) || mentionsValuation(f) || mentionsEarnings(f),
+      );
+      break;
+    }
+    case "sec_investment_action": {
+      // Final action: top of each pile (positive / negative / watch).
       const top = (set: Set<string>, n: number): ResearchFinding[] =>
         all
           .filter((f) => set.has(f.id))
           .sort(byImpactRank)
           .slice(0, n);
       const merged = new Map<string, ResearchFinding>();
-      for (const f of top(positives, 3)) merged.set(f.id, f);
-      for (const f of top(negatives, 3)) merged.set(f.id, f);
-      for (const f of top(watches, 3)) merged.set(f.id, f);
+      for (const f of top(positives, 2)) merged.set(f.id, f);
+      for (const f of top(negatives, 2)) merged.set(f.id, f);
+      for (const f of top(watches, 2)) merged.set(f.id, f);
       picked = [...merged.values()];
       break;
     }
-    case "sec_eps_bridge": {
-      const allowed = CATEGORY_MAP.sec_eps_bridge;
-      picked = all.filter((f) => allowed.has(f.category) || mentionsEarnings(f));
-      break;
-    }
-    case "sec_valuation_peer_gap": {
-      const allowed = CATEGORY_MAP.sec_valuation_peer_gap;
+    case "sup_eps_bridge": {
+      const allowed = CATEGORY_MAP.sup_eps_bridge;
       picked = all.filter(
-        (f) => allowed.has(f.category) || (watches.has(f.id) && mentionsValuation(f)),
+        (f) => allowed.has(f.category) || mentionsEarnings(f),
       );
       break;
     }
-    default: {
-      const allowed = CATEGORY_MAP[sectionId];
+    case "sup_valuation_detail": {
+      const allowed = CATEGORY_MAP.sup_valuation_detail;
+      picked = all.filter(
+        (f) => allowed.has(f.category) || mentionsValuation(f),
+      );
+      break;
+    }
+    case "sup_financials_actuals": {
+      const allowed = CATEGORY_MAP.sup_financials_actuals;
       picked = all.filter((f) => allowed.has(f.category));
+      break;
     }
   }
 
@@ -182,20 +298,6 @@ function byImpactRank(a: ResearchFinding, b: ResearchFinding): number {
   return IMPACT_RANK[b.impact] - IMPACT_RANK[a.impact];
 }
 
-function isWatchSupported(f: ResearchFinding, research: ResearchFindings): boolean {
-  if (f.impact !== "watch") return false;
-  return research.thesisCheckpointImpact.some(
-    (c) => c.impact === "supported" && c.findingIds.includes(f.id),
-  );
-}
-
-function isWatchChallenged(f: ResearchFinding, research: ResearchFindings): boolean {
-  if (f.impact !== "watch") return false;
-  return research.thesisCheckpointImpact.some(
-    (c) => c.impact === "challenged" && c.findingIds.includes(f.id),
-  );
-}
-
 function mentionsEarnings(f: ResearchFinding): boolean {
   const text = `${f.summary} ${f.relevance}`.toLowerCase();
   return /\b(eps|earnings|pat|profit|margin|guidance)\b/.test(text);
@@ -203,7 +305,7 @@ function mentionsEarnings(f: ResearchFinding): boolean {
 
 function mentionsValuation(f: ResearchFinding): boolean {
   const text = `${f.summary} ${f.relevance}`.toLowerCase();
-  return /\b(valuation|multiple|p\/e|price target|target price|peer)\b/.test(text);
+  return /\b(valuation|multiple|p\/e|price target|target price|peer|p\/b|ev\/ebitda)\b/.test(text);
 }
 
 export function distillStyleSample(dna: MemoDNA, maxChars: number): string[] {
@@ -223,11 +325,15 @@ export function distillStyleSample(dna: MemoDNA, maxChars: number): string[] {
   return out;
 }
 
+// Phase 6B: the final-action digest now draws on the five PRIOR core
+// sections of the new memo (scorecard, what-changed, shareholding,
+// industry, corporate-events).
 const DIGEST_SECTION_IDS: CanonicalSectionId[] = [
-  "sec_memo_held",
-  "sec_memo_broke",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
 ];
 
 export function buildPriorSectionsDigest(
@@ -263,17 +369,25 @@ export function assembleMemo(args: AssembleMemoArgs): FollowUpMemo {
     const s = map.get(id);
     if (s) ordered.push(s);
   }
-  if (ordered.length !== 9) {
+  if (ordered.length !== CANONICAL_SECTION_IDS.length) {
     throw new Error(
-      `assembleMemo: expected 9 canonical sections, got ${ordered.length}`,
+      `assembleMemo: expected ${CANONICAL_SECTION_IDS.length} canonical sections, got ${ordered.length}`,
     );
   }
+
+  // Split ordered into core sections and supplementary panels.
+  const coreSections = ordered.filter((s) => isCoreSectionId(s.id));
+  const supplementaryPanels = ordered.filter((s) =>
+    isSupplementaryPanelId(s.id),
+  );
 
   const memo: FollowUpMemo = {
     projectId: args.project.id,
     title: `Follow-up Memo — ${args.project.companyName}`,
     generatedAt: args.generatedAt,
-    sections: ordered,
+    sections: coreSections,
+    supplementaryPanels:
+      supplementaryPanels.length > 0 ? supplementaryPanels : undefined,
     isDemo: false,
     sourceMode: "llm",
   };
@@ -516,7 +630,7 @@ function buildSectionRequest(
     memoUnderstandingDigest: args.memoUnderstandingDigest,
     retryCompact: retryCompact ? true : undefined,
   };
-  if (sectionId === "sec_final_action") {
+  if (sectionId === "sec_investment_action") {
     const digest = buildPriorSectionsDigest(completed);
     if (digest.length > 0) req.priorSectionsDigest = digest;
   }

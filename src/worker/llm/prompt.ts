@@ -4,29 +4,30 @@ import type {
   ResearchFindings,
 } from "@shared/types";
 
+// Phase 6B: rewritten for the 6-core + 3-supplementary memo structure.
 const CANONICAL_SECTION_IDS = [
-  "sec_thesis_snapshot",
-  "sec_q4_retest",
-  "sec_mgmt_retest",
-  "sec_ai_macro_risk",
-  "sec_memo_held",
-  "sec_memo_broke",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
-  "sec_final_action",
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
+  "sec_investment_action",
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
 ] as const;
 
 const CANONICAL_TITLES: Record<(typeof CANONICAL_SECTION_IDS)[number], string> =
   {
-    sec_thesis_snapshot: "Original Thesis Snapshot",
-    sec_q4_retest: "Latest Financial Re-test",
-    sec_mgmt_retest: "Management Commentary Re-test",
-    sec_ai_macro_risk: "AI / Macro / Competitive Risk Check",
-    sec_memo_held: "Where the Original Memo Held",
-    sec_memo_broke: "Where the Original Memo Broke",
-    sec_eps_bridge: "EPS Credibility Bridge",
-    sec_valuation_peer_gap: "Valuation and Peer Gap",
-    sec_final_action: "Final Investment Action",
+    sec_thesis_scorecard: "Memo vs Reality Scorecard",
+    sec_what_changed: "What Changed — Industry · Company · Financials",
+    sec_shareholding: "Shareholding & Ownership Changes",
+    sec_industry_regulatory: "Industry & Regulatory Developments",
+    sec_corporate_events: "Corporate Events (Last 12 Months)",
+    sec_investment_action: "Updated Investment View",
+    sup_valuation_detail: "Valuation Detail · Then vs Now",
+    sup_eps_bridge: "EPS Credibility Bridge",
+    sup_financials_actuals: "Memo Forecasts vs Reported Financials",
   };
 
 export interface BuildPromptResult {
@@ -69,32 +70,36 @@ export function buildPrompt(
     "- HARD: Do NOT write 'Needs manual verification' inside any section body, bullet, summary, or `confidenceNote`. Do NOT repeat the same manual-check phrase across sections.",
     "- If specific checks remain, list them ONCE in the top-level `manualChecksRemaining` array (one short line each). That array is rendered once at the foot of the memo.",
     "",
-    "Bridge rows (NEW — for the three quantitative sections):",
-    "- For sec_q4_retest, sec_eps_bridge, and sec_valuation_peer_gap, populate `bridge` with rows: { metric, original?, latest?, readThrough? }.",
+    "Bridge rows (for the quantitative sections):",
+    "- For sec_thesis_scorecard, sup_valuation_detail, sup_eps_bridge, and sup_financials_actuals, populate `bridge` with rows: { metric, original?, latest?, readThrough? }.",
     "- Only populate `bridge` rows where you have a source-anchored value. Leave a field blank rather than inventing a number.",
     "- Do NOT say 'cannot be fully re-tested' if at least one bridge row is populated.",
-    "- sec_q4_retest preferred metrics: revenue growth YoY, EBITDA growth, EBITDA margin, PAT / adjusted PAT, EPS, segment growth, key one-offs / other income, guidance change, consensus beat/miss.",
-    "- sec_eps_bridge preferred metrics: prior EPS estimate, latest reported EPS / revised estimate, deltas explained line by line.",
-    "- sec_valuation_peer_gap preferred metrics: original valuation anchor (e.g. '50x Dec'27E EPS = INR 1,750'), current trading multiple if available, original target price / upside, current valuation read-through, EPS credibility, whether the original PT/upside case still holds. When current market price isn't reliably source-verified, use 'current price not source-verified in this run' rather than inventing a number.",
+    "- sec_thesis_scorecard preferred metrics: stock price (memo-date vs current), original target / upside, implied price on original multiple, memo revenue/EBITDA/EPS forecast vs reported.",
+    "- sup_eps_bridge preferred metrics: prior EPS estimate, latest reported EPS / revised estimate, deltas explained line by line.",
+    "- sup_valuation_detail preferred metrics: original valuation anchor (e.g. '50x Dec'27E EPS = INR 1,750'), current trading multiple, original target price / upside, current valuation read-through, peer multiple gap, return attribution (% earnings vs % multiple). When current price isn't source-verified, use 'current price not verified from a primary source' rather than inventing a number.",
+    "- sup_financials_actuals preferred metrics: revenue, EBITDA, EBITDA margin, PAT, EPS, OCF/FCF, net debt — memo expectation vs reported actual.",
     "",
     "Research-to-memo handoff (NEW — weight findings by tier):",
     "- Treat findings backed by official / company / exchange / transcript sources as the SPINE of the memo.",
     "- press / market_data findings are corroborating only — never the sole basis for a non-neutral claim.",
     "- Findings whose only verified source is `tier: other` or which have no `verifiedByWebSearch` source can be used for color at most; they must NOT drive thesis-level conclusions.",
     "",
-    "Final action (sec_final_action) MUST follow this template verbatim in `body`, including the closing caveat line:",
+    "Final action (sec_investment_action) MUST follow this template verbatim in `body`, including the closing caveat line:",
     "  Provisional action: ADD / HOLD / WATCH / REDUCE / AVOID",
-    "  Confidence: High / Medium / Low",
+    "  Classification: Stronger than original memo / Broadly on track / Mixed but monitorable / Materially weakened / Broken thesis",
     "  Why:",
     "  - bullet",
     "  - bullet",
     "  - bullet",
     "  What would change the call:",
+    "  - Positive: trigger 1, trigger 2",
+    "  - Negative: trigger 1, trigger 2",
+    "  Top 3 to monitor:",
     "  - trigger 1",
     "  - trigger 2",
     "  - trigger 3",
     "",
-    "  Note: This is a draft for research workflow support, not investment advice; human analyst sign-off required.",
+    "  Note: Draft for research support — not investment advice; analyst sign-off required.",
     "",
     "The action label is explicitly PROVISIONAL — never present it as a final recommendation. The investment-advice caveat is required and must appear in the section body exactly as written.",
   ];
@@ -237,22 +242,22 @@ function buildUserPrompt(req: GenerateFollowUpMemoRequest): string {
   lines.push("");
   lines.push("# 7. Output requirements");
   lines.push(
-    "- Exactly 9 sections, in the canonical order and ids from the system prompt.",
+    "- Exactly 9 sections (6 core sec_* + 3 supplementary sup_*), in the canonical order and ids from the system prompt.",
   );
   lines.push(
-    "- Each section: id, title, summary (2–4 lines max), body (short paragraphs only), bullets (3–5 max), signal (positive|negative|neutral|watch), confidence (high|medium|low), confidenceNote (one short sentence WHY — never 'Needs manual verification'), sources (cite ids from §6 only).",
+    "- Each section: id, title, summary (ONE line max), body (2–4 short sentences), bullets (3 max), signal (positive|negative|neutral|watch), confidence (high|medium|low), confidenceNote (one short sentence WHY — never 'Needs manual verification'), sources (cite ids from §6 only).",
   );
   lines.push(
-    "- For sec_q4_retest, sec_eps_bridge, sec_valuation_peer_gap: populate `bridge` rows with source-anchored values; leave a field blank rather than invent one.",
+    "- For sec_thesis_scorecard, sup_valuation_detail, sup_eps_bridge, sup_financials_actuals: populate `bridge` rows with source-anchored values; leave a field blank rather than invent one.",
   );
   lines.push(
     "- For each source, include the documentId (required) plus optional page and quote.",
   );
   lines.push(
-    "- 'Where the Original Memo Held' / 'Where the Original Memo Broke' must reflect the actual evidence in §4 and §5, anchored on the checkpoints in §3.",
+    "- 'What Changed' and 'Shareholding' sections must reflect the actual evidence in §4 and §5, anchored on the checkpoints in §3.",
   );
   lines.push(
-    "- 'Final Investment Action' (sec_final_action) MUST follow the provisional template from the system prompt — including the closing 'not investment advice; human analyst sign-off required' caveat — and reflect the overall balance of evidence.",
+    "- 'Updated Investment View' (sec_investment_action) MUST follow the provisional template from the system prompt — including the closing 'not investment advice; analyst sign-off required' caveat — and reflect the overall balance of evidence.",
   );
   lines.push(
     "- If specific checks still need a human, list them ONCE at the top-level `manualChecksRemaining`. Do NOT scatter 'Needs manual verification' across the sections.",

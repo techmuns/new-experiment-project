@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, FileText } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FileText,
+  Layers,
+} from "lucide-react";
 import type {
   FollowUpMemo,
   MemoConfidence,
@@ -89,6 +96,16 @@ export function MemoReview({
       </header>
 
       <article className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)] px-8 sm:px-10 py-8">
+        <div className="mb-5 inline-flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+          <span className="uppercase tracking-[0.1em] font-semibold">
+            Memo body
+          </span>
+          <span className="opacity-60">·</span>
+          <span>
+            {memo.sections.length} section{memo.sections.length === 1 ? "" : "s"} ·
+            designed to fit under three pages
+          </span>
+        </div>
         {memo.sections.map((section, i) => (
           <SectionView
             key={section.id}
@@ -120,6 +137,135 @@ export function MemoReview({
           </section>
         )}
       </article>
+
+      {memo.supplementaryPanels && memo.supplementaryPanels.length > 0 && (
+        <SupplementaryPanels panels={memo.supplementaryPanels} />
+      )}
+    </div>
+  );
+}
+
+// Phase 6B: supplementary panels render BELOW the memo as collapsible
+// drawers. They carry the deep valuation/EPS/financial math that would
+// push the printed memo over three pages.
+function SupplementaryPanels({ panels }: { panels: MemoSection[] }) {
+  return (
+    <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)] px-6 sm:px-8 py-6">
+      <header className="flex items-baseline gap-2 mb-4">
+        <Layers className="w-4 h-4 text-[var(--color-text-muted)] translate-y-[2px]" />
+        <h3
+          className="text-[15px] font-semibold tracking-tight text-[var(--color-text)]"
+          style={{ fontFamily: "var(--font-serif)" }}
+        >
+          Supplementary detail
+        </h3>
+        <span className="text-[11px] text-[var(--color-text-muted)]">
+          Valuation · EPS bridge · memo-vs-actual financials — collapsed so the
+          memo above stays under three pages
+        </span>
+      </header>
+      <div className="space-y-2">
+        {panels.map((p) => (
+          <PanelDrawer key={p.id} panel={p} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PanelDrawer({ panel }: { panel: MemoSection }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-muted)]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-baseline gap-3 px-4 py-3 text-left"
+      >
+        <span className="w-4 inline-flex justify-center text-[var(--color-text-muted)] translate-y-[2px]">
+          {open ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" />
+          )}
+        </span>
+        <span
+          className="text-[14px] font-semibold tracking-tight text-[var(--color-text)] flex-1"
+          style={{ fontFamily: "var(--font-serif)" }}
+        >
+          {panel.title}
+        </span>
+        {panel.signal && (
+          <Badge tone={SIGNAL_BADGE_TONE[panel.signal]} dot>
+            {SIGNAL_LABEL[panel.signal]}
+          </Badge>
+        )}
+        {panel.confidence && (
+          <Badge tone={CONFIDENCE_TONE[panel.confidence]}>
+            {CONFIDENCE_LABEL[panel.confidence]}
+          </Badge>
+        )}
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
+          {panel.summary && panel.summary !== panel.body && (
+            <p
+              className="text-[14px] text-[var(--color-text)] leading-[1.65] font-medium mt-3 mb-2"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              {panel.summary}
+            </p>
+          )}
+          {panel.bridge && panel.bridge.length > 0 && (
+            <BridgeTable rows={panel.bridge} />
+          )}
+          {panel.body && (
+            <p
+              className="text-[14px] text-[var(--color-text)] leading-[1.65] whitespace-pre-line mt-3"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              {panel.body}
+            </p>
+          )}
+          {panel.bullets && panel.bullets.length > 0 && (
+            <ul className="mt-3 space-y-1.5 list-disc pl-5">
+              {panel.bullets.map((b, bi) => (
+                <li
+                  key={bi}
+                  className="text-[13.5px] text-[var(--color-text)] leading-[1.6]"
+                  style={{ fontFamily: "var(--font-serif)" }}
+                >
+                  {b}
+                </li>
+              ))}
+            </ul>
+          )}
+          {panel.confidenceNote && (
+            <p className="mt-3 text-[11px] italic text-[var(--color-text-subtle)]">
+              {panel.confidenceNote}
+            </p>
+          )}
+          {panel.sources.length > 0 && (
+            <ul className="mt-3 space-y-1 border-l-2 border-[var(--color-border)] pl-3">
+              {panel.sources.map((src, i) => (
+                <li
+                  key={`${src.documentId}-${i}`}
+                  className="text-[11px] text-[var(--color-text-muted)] leading-snug inline-flex items-start gap-1.5"
+                >
+                  <FileText className="w-3 h-3 mt-0.5 shrink-0" />
+                  <span>
+                    <span className="font-medium text-[var(--color-text)]">
+                      {humanSourceLabel(src.documentId, i)}
+                    </span>
+                    {src.page && <> · p.{src.page}</>}
+                    {src.quote && <> — "{src.quote}"</>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -301,42 +447,7 @@ function buildMarkdown(memo: FollowUpMemo): string {
     `Generated: ${memo.generatedAt}`,
     "",
   ];
-  memo.sections.forEach((s, i) => {
-    const confTag = s.confidence
-      ? `  _(confidence: ${s.confidence})_`
-      : "";
-    lines.push(`## ${i + 1}. ${s.title}${confTag}`);
-    if (s.summary) lines.push(s.summary);
-    if (s.bridge && s.bridge.length > 0) {
-      lines.push("", "| Metric | Original anchor | Latest | Read-through |");
-      lines.push("| --- | --- | --- | --- |");
-      for (const row of s.bridge) {
-        lines.push(
-          `| ${escapePipe(row.metric)} | ${escapePipe(row.original ?? "—")} | ${escapePipe(row.latest ?? "—")} | ${escapePipe(row.readThrough ?? "—")} |`,
-        );
-      }
-    }
-    if (s.body && s.body !== s.summary) lines.push("", s.body);
-    if (s.bullets && s.bullets.length > 0) {
-      lines.push("");
-      for (const b of s.bullets) lines.push(`- ${b}`);
-    }
-    if (s.confidenceNote) {
-      lines.push("", `_${s.confidenceNote}_`);
-    }
-    if (s.sources.length > 0) {
-      lines.push("", "**Sources:**");
-      s.sources.forEach((src, si) => {
-        const extras = [src.page ? `p.${src.page}` : null, src.quote ? `"${src.quote}"` : null]
-          .filter(Boolean)
-          .join(" — ");
-        lines.push(
-          `- ${humanSourceLabel(src.documentId, si)}${extras ? ` · ${extras}` : ""}`,
-        );
-      });
-    }
-    lines.push("");
-  });
+  memo.sections.forEach((s, i) => appendSectionMarkdown(lines, s, i + 1));
   if (memo.manualChecksRemaining && memo.manualChecksRemaining.length > 0) {
     lines.push("## Manual checks remaining", "");
     for (const item of memo.manualChecksRemaining) {
@@ -344,7 +455,55 @@ function buildMarkdown(memo: FollowUpMemo): string {
     }
     lines.push("");
   }
+  if (memo.supplementaryPanels && memo.supplementaryPanels.length > 0) {
+    lines.push("---", "", "# Supplementary detail", "");
+    memo.supplementaryPanels.forEach((s, i) =>
+      appendSectionMarkdown(lines, s, i + 1),
+    );
+  }
   return lines.join("\n");
+}
+
+function appendSectionMarkdown(
+  lines: string[],
+  s: MemoSection,
+  index: number,
+): void {
+  const confTag = s.confidence ? `  _(confidence: ${s.confidence})_` : "";
+  lines.push(`## ${index}. ${s.title}${confTag}`);
+  if (s.summary) lines.push(s.summary);
+  if (s.bridge && s.bridge.length > 0) {
+    lines.push("", "| Metric | Original anchor | Latest | Read-through |");
+    lines.push("| --- | --- | --- | --- |");
+    for (const row of s.bridge) {
+      lines.push(
+        `| ${escapePipe(row.metric)} | ${escapePipe(row.original ?? "—")} | ${escapePipe(row.latest ?? "—")} | ${escapePipe(row.readThrough ?? "—")} |`,
+      );
+    }
+  }
+  if (s.body && s.body !== s.summary) lines.push("", s.body);
+  if (s.bullets && s.bullets.length > 0) {
+    lines.push("");
+    for (const b of s.bullets) lines.push(`- ${b}`);
+  }
+  if (s.confidenceNote) {
+    lines.push("", `_${s.confidenceNote}_`);
+  }
+  if (s.sources.length > 0) {
+    lines.push("", "**Sources:**");
+    s.sources.forEach((src, si) => {
+      const extras = [
+        src.page ? `p.${src.page}` : null,
+        src.quote ? `"${src.quote}"` : null,
+      ]
+        .filter(Boolean)
+        .join(" — ");
+      lines.push(
+        `- ${humanSourceLabel(src.documentId, si)}${extras ? ` · ${extras}` : ""}`,
+      );
+    });
+  }
+  lines.push("");
 }
 
 function escapePipe(value: string): string {

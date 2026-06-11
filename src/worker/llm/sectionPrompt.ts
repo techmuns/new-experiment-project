@@ -4,28 +4,33 @@ import type {
   MemoUnderstandingDigest,
 } from "@shared/types";
 
+// Phase 6B: restructured for client feedback (Jun 2026).
+// Core memo (6) — printed body, target <3 pages combined.
+// Supplementary (3) — collapsible drawers below the memo, for the
+// deeper valuation/EPS/financial math that would push the memo over
+// three pages.
 export const CANONICAL_SECTION_IDS: readonly CanonicalSectionId[] = [
-  "sec_thesis_snapshot",
-  "sec_q4_retest",
-  "sec_mgmt_retest",
-  "sec_ai_macro_risk",
-  "sec_memo_held",
-  "sec_memo_broke",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
-  "sec_final_action",
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
+  "sec_investment_action",
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
 ] as const;
 
 export const CANONICAL_SECTION_TITLES: Record<CanonicalSectionId, string> = {
-  sec_thesis_snapshot: "Original Thesis Snapshot",
-  sec_q4_retest: "Latest Financial Re-test",
-  sec_mgmt_retest: "Management Commentary Re-test",
-  sec_ai_macro_risk: "AI / Macro / Competitive Risk Check",
-  sec_memo_held: "Where the Original Memo Held",
-  sec_memo_broke: "Where the Original Memo Broke",
-  sec_eps_bridge: "EPS Credibility Bridge",
-  sec_valuation_peer_gap: "Valuation and Peer Gap",
-  sec_final_action: "Final Investment Action",
+  sec_thesis_scorecard: "Memo vs Reality Scorecard",
+  sec_what_changed: "What Changed — Industry · Company · Financials",
+  sec_shareholding: "Shareholding & Ownership Changes",
+  sec_industry_regulatory: "Industry & Regulatory Developments",
+  sec_corporate_events: "Corporate Events (Last 12 Months)",
+  sec_investment_action: "Updated Investment View",
+  sup_valuation_detail: "Valuation Detail · Then vs Now",
+  sup_eps_bridge: "EPS Credibility Bridge",
+  sup_financials_actuals: "Memo Forecasts vs Reported Financials",
 };
 
 export interface BuildSectionPromptResult {
@@ -34,19 +39,35 @@ export interface BuildSectionPromptResult {
   allowedDocumentIds: Set<string>;
 }
 
+// HARDER length ceilings than Phase 5/6A — the entire core memo
+// (six sec_ sections) must fit under three pages. Per-section budgets:
+//
+//   sec_thesis_scorecard:    ~0.6 page
+//   sec_what_changed:        ~0.5 page
+//   sec_shareholding:        ~0.4 page
+//   sec_industry_regulatory: ~0.4 page
+//   sec_corporate_events:    ~0.5 page
+//   sec_investment_action:   ~0.4 page
+//
+// Supplementary panels are collapsible — they can be slightly longer
+// (one table + 2 short paragraphs each).
 const SHARED_SYSTEM_LINES = [
-  "You are a buy-side / institutional broker-note analyst updating ONE section of an existing investment thesis.",
-  "Mirror the original uploaded memo's voice: number-led, thesis-driven, checkpoint-based, concise. Direct investor language. No hedging in every paragraph.",
+  "You are a buy-side / institutional broker-note analyst writing a tight follow-up update to an existing investment thesis.",
+  "Mirror the original uploaded memo's voice: number-led, thesis-driven, concise. Direct investor language. No hedging in every paragraph.",
   "",
-  "Length ceilings (HARD limits):",
-  "- `summary`: 2–4 lines max.",
-  "- `bullets`: 3–5 short investor-grade lines.",
-  "- `body`: short paragraphs only — not multi-paragraph essays.",
-  "- Avoid generic AI phrasing. Write like the original memo: direct, specific, source-anchored.",
+  "PAGE-BUDGET DISCIPLINE — the entire follow-up memo must fit under THREE pages combined across the six core (sec_*) sections. Treat the length ceilings below as HARD limits. Tighter is always better than fuller.",
+  "",
+  "Default length ceilings (HARD):",
+  "- `summary`: ONE concise line (≤ 180 chars).",
+  "- `body`: 2–4 short sentences MAX. Never multi-paragraph essays. Never repeats `summary`.",
+  "- `bullets`: 3 short investor-grade lines MAX. Number-led where sources allow.",
+  "- `bridge` (when used): 3–5 rows MAX. Keep each cell ≤ 80 chars; leave a cell null rather than write a paragraph.",
+  "- `sources`: 3 MAX per section. Cite the highest-tier finding ids.",
+  "- `confidenceNote`: one short sentence (≤ 160 chars).",
   "",
   "Rules you must follow:",
   "- Cite only material provided in this request (original memo + listed research findings).",
-  "- Flag missing data explicitly. Do not invent numbers, dates, or commentary. No fake precision.",
+  "- Flag missing data explicitly. Never invent numbers, dates, names of funds, or commentary. No fake precision.",
   "- Cite only documentIds listed in the 'Available document IDs' table.",
   "- Emit a SINGLE JSON object matching the schema — one MemoSection. No prose outside the JSON.",
   "- `id` MUST equal the section id requested. Do NOT emit any other section id.",
@@ -55,7 +76,7 @@ const SHARED_SYSTEM_LINES = [
   "- official / company / exchange / transcript sources → favor `high`.",
   "- press / market_data sources only → `medium`.",
   "- no source at all → `low`.",
-  "- Use `confidenceNote` (one short sentence) for the WHY. Never the words 'Needs manual verification'.",
+  "- Use `confidenceNote` for the WHY in one sentence. Never the words 'Needs manual verification'.",
   "",
   "Watch findings (impact: 'watch') are partial validators — include them where they confirm or call into question the original thesis. Do NOT ignore them.",
   "",
@@ -66,123 +87,148 @@ const SHARED_SYSTEM_LINES = [
   "",
   "Prose hygiene (HARD — the memo goes to a client):",
   "- NEVER write internal ids in any visible field (summary, body, bullets, bridge cells, confidenceNote): no finding ids like 'r01' or 'f01', no document ids, no upload ids like 'local_initial_...'. Machine ids belong ONLY inside sources[].documentId.",
-  "- In prose, refer to evidence with human labels: 'the Q4 filing', 'the exchange filing', 'the earnings call', 'the investor presentation', 'press reports', 'market data'. Never 'finding r01 shows...'.",
-  "- NEVER use process/meta language in section fields. Banned phrases: 'not directly retrieved', 'this pass', 'source constraints', 'manual verification needed', 'provided materials', 'research workflow', 'AI', 'tool results', 'screeners say'. Data caveats belong in the workflow's manual-checks list (appended separately) — not in sections.",
+  "- In prose, refer to evidence with human labels: 'the Q4 filing', 'the exchange filing', 'the earnings call', 'the shareholding pattern filing', 'press reports', 'market data'. Never 'finding r01 shows...'.",
+  "- NEVER use process/meta language in section fields. Banned phrases: 'not directly retrieved', 'this pass', 'source constraints', 'manual verification needed', 'provided materials', 'research workflow', 'AI', 'tool results', 'screeners say'.",
   "- `confidenceNote` = one evidence-based sentence (what supports the confidence level), with no process language.",
   "- Voice: direct, investor-focused, number-led, concise. A buy-side reader should not be able to tell this section came from an automated workflow.",
 ];
 
 const SECTION_BLOCKS: Record<CanonicalSectionId, string> = {
-  sec_thesis_snapshot: [
-    "This is the 'Original Thesis Snapshot' section.",
+  // ------------------------ CORE MEMO (6) ------------------------
+  sec_thesis_scorecard: [
+    "This is the 'Memo vs Reality Scorecard' section — the OPENING of the memo.",
+    "Purpose: in one screen, show how the original memo's call has played out — stock return vs target, target-price status, and whether reported financials beat or missed the memo's expectations.",
     "Required content:",
-    "- Frame the ORIGINAL thesis as of the memo's latest period (use the Memo latest period from the request).",
-    "- 3–5 short bullets covering: thesis statement, key assumptions, valuation anchor, primary risks.",
-    "- Body: a brief paragraph that restates the bull case in the original memo's voice.",
-    "- This section is DNA-derived only. No research findings are passed for it.",
-    "- Confidence: set to `high` if DNA is rich, `medium` otherwise. Sources: cite the initial memo documentId.",
-    "- `bridge`: omit (no quantitative re-test here).",
+    "- `summary`: one line that answers 'is the original call working, broken, or mixed?' — include the absolute stock return since memo and one verdict word (working / mixed / broken).",
+    "- `bridge`: REQUIRED. 3–5 rows. Preferred metrics in this order:",
+    "  1. Stock price (Original at memo date vs Current, with one-line read-through e.g. '+16% in 25 months')",
+    "  2. Original target price / upside (vs current price implied upside or downside)",
+    "  3. Price implied by ORIGINAL multiple on LATEST reported earnings (when both numbers are sourced)",
+    "  4. Memo revenue/EBITDA/EPS forecast vs reported (pick the single most important)",
+    "  5. Memo-vs-reported margin or growth (one row only — keep it tight)",
+    "  When the current market price isn't verified from a primary source, write 'current price not verified from a primary source' rather than inventing a number.",
+    "- `body`: 2–3 sentences. State the return attribution in ONE sentence (e.g. '~100% of return came from earnings; the multiple de-rated 13%'), and whether the original thesis pillar is intact, partly broken, or broken.",
+    "- `bullets`: omit OR up to 3 number-led bullets if the bridge isn't enough.",
+    "- `signal`: `positive` if return ≥ memo upside; `watch` if mixed; `negative` if broken; `neutral` only when sources are absent.",
   ].join("\n"),
-  sec_q4_retest: [
-    "This is the 'Latest Financial Re-test' section.",
-    "Required content:",
-    "- Re-test the original financial framework against the latest reported data using the financials/guidance findings below.",
-    "- `body`: ONE short paragraph (3 sentences max). No markdown tables. No multi-paragraph essays.",
-    "- `bullets`: 3 short investor-grade lines max — concrete YoY / QoQ deltas where sources provide them.",
-    "- `bridge`: REQUIRED when at least one financials/guidance finding has source-anchored numbers. Produce 3–4 rows MAXIMUM (never more than 4).",
-    "  Preferred metrics in order: revenue YoY, EBITDA margin, PAT / adjusted PAT, EPS.",
-    "  - Keep each cell SHORT (≤ 80 chars). Numbers + units only (e.g. '16% YoY', '11.4%', 'INR 1,245').",
-    "  - LEAVE A CELL BLANK (use null) rather than write an explanatory paragraph into it.",
-    "  - Skip currency symbols when a plain code works (use 'INR' not '₹'; use 'USD' not '$'). This avoids JSON-escaping pitfalls.",
-    "- `sources`: 3 maximum. Cite the highest-tier finding ids.",
-    "- `confidenceNote`: ONE short sentence, ≤ 180 chars.",
-    "- If no financials/guidance findings are provided, return a 2-sentence body, set `confidence: low`, omit `bridge`, and stop.",
+  sec_what_changed: [
+    "This is the 'What Changed — Industry · Company · Financials' section.",
+    "Required structure (HARD — the body MUST follow this format):",
+    "  `body` ends with a one-line judgement: 'Thesis strengthened / weakened / broadly intact, because <one short reason>.'",
+    "  `bullets`: EXACTLY three bullets, labeled 'Industry:', 'Company:', 'Financials:' (one each). Each bullet ≤ 240 chars.",
+    "    - Industry: structural / demand / pricing / competition / regulation / AI changes that matter to the thesis.",
+    "    - Company: strategy / management / ownership / capex / capital allocation / M&A / governance.",
+    "    - Financials: revenue growth, margins, profitability, cash flow, leverage vs what the memo expected.",
+    "- `summary`: omit, OR a one-line title-case line stating the headline shift.",
+    "- `body`: ONE short paragraph (2–3 sentences). May add a final line with the strengthened/weakened/intact verdict if not already in the bullets.",
+    "- `signal`: `positive` if thesis strengthened, `negative` if weakened, `watch` if mixed, `neutral` only when no findings exist.",
   ].join("\n"),
-  sec_mgmt_retest: [
-    "This is the 'Management Commentary Re-test' section.",
+  sec_shareholding: [
+    "This is the 'Shareholding & Ownership Changes' section.",
+    "CLIENT REQUIREMENT (HARD): do NOT stop at promoter / FII / DII broad-view percentages. Where research surfaces named funds or institutional holders (e.g. 'XYZ Mutual Fund bought 1.2%', 'Morgan Stanley exited', 'promoter pledged 4%'), call them out by name.",
     "Required content:",
-    "- Re-test management's prior guidance/commentary against the latest management/filings/broker_consensus findings.",
-    "- Highlight: tone change, kept commitments, missed commitments, capital-allocation moves, M&A integration.",
-    "- Cite transcript / filing / press sources by documentId.",
+    "- `bridge`: REQUIRED when shareholding-pattern findings exist. 3–5 rows MAX. Preferred metrics:",
+    "  1. Promoter holding (memo-date % → latest %), with pledge change",
+    "  2. FII holding (memo-date % → latest %)",
+    "  3. DII / mutual fund holding (memo-date % → latest %)",
+    "  4. Public / retail holding (memo-date % → latest %)",
+    "  5. (Optional) Largest single shareholder change (named fund) — readThrough cell says what changed",
+    "- `body`: 2–3 sentences. Name the funds where sourced — 'ABC MF added 1.2 ppt, XYZ FII exited the register.' If insider trades, QIPs, preferential allotments, warrants, rights, buybacks or pledges occurred, call them out.",
+    "- `bullets`: 2–3 max. Each bullet should be ONE named change (e.g. 'Promoter pledge released — 4% → 0%').",
+    "- `signal`: `positive` if ownership shift is supportive (new strong holder, pledge released); `negative` if concerning (FII flight, promoter sell-down, fresh pledge); `watch` if mixed.",
+    "- Honesty rule: if research did not surface fund-level names, say so in ONE sentence ('Fund-level detail not surfaced in this run') instead of inventing names. Set confidence to low.",
+  ].join("\n"),
+  sec_industry_regulatory: [
+    "This is the 'Industry & Regulatory Developments' section.",
+    "Required content:",
+    "- `body`: ONE short paragraph (2–4 sentences) covering: demand environment, pricing power, competitive intensity, technological / AI disruption, regulatory changes specific to the sector.",
+    "- `bullets`: 2–3 max. Each bullet calls out ONE structural shift with a number or named regulator/competitor where sourced.",
+    "- For banking / financial-services / pharma / insurance / utilities companies, regulatory shifts are FIRST-PRIORITY content — lead with regulation if a meaningful change has occurred.",
+    "- Where AI / platform disintermediation / commoditisation / customer-insourcing is a credible thesis-relevant risk, explicitly flag how serious it is and how management is responding.",
+    "- `signal`: `positive` if regulatory / industry trend is supportive, `negative` if adverse, `watch` if mixed, `neutral` only when no industry findings exist.",
     "- `bridge`: omit (qualitative section).",
   ].join("\n"),
-  sec_ai_macro_risk: [
-    "This is the 'AI / Macro / Competitive Risk Check' section.",
+  sec_corporate_events: [
+    "This is the 'Corporate Events — Last 12 Months' section.",
     "Required content:",
-    "- Re-test AI/tech-risk, macro, and peer-competitive risks using the ai_tech_risk/macro/peers findings.",
-    "- If no findings in these categories were provided, say so in TWO sentences and stop. Do NOT invent risks.",
+    "- `body`: NO long prose. ONE sentence framing the event mix.",
+    "- `bullets`: 2–3 events MAX. Each bullet is ONE event in the form: '<What happened> — <Why it matters in 1 phrase>' (≤ 240 chars).",
+    "  Event scope: M&A, divestments, restructuring, capex announcements, major contract wins/losses, fund-raises (QIP, NCD, rights), debt refinancing, buybacks, dividends, KMP changes (CFO/CEO/auditor resignations), board changes, litigation, regulatory action, large strategic pivots.",
+    "  Each bullet MUST end with a directional tag in brackets: [improves] / [weakens] / [mixed] / [neutral] for the investment case.",
+    "- `signal`: `positive` if the event mix improves the case; `negative` if it weakens it; `watch` if mixed; `neutral` only when no findings.",
     "- `bridge`: omit.",
   ].join("\n"),
-  sec_memo_held: [
-    "This is the 'Where the Original Memo Held' section.",
-    "Required content:",
-    "- Identify checkpoints/assumptions from the original memo that the latest research VALIDATED.",
-    "- Use findings flagged in `positiveDevelopmentIds` and watch findings tied to checkpoints with impact=`supported`.",
-    "- 3–4 short bullets. Cite evidence via `sources[]` only — in prose use human source labels ('the Q4 filing', 'the earnings call'), never machine ids.",
-    "- `bridge`: omit. `signal`: typically `positive` or `neutral`.",
-  ].join("\n"),
-  sec_memo_broke: [
-    "This is the 'Where the Original Memo Broke' section.",
-    "Purpose: identify where the original memo is now LESS CLEAN — not only where it outright broke. Partial challenges count.",
-    "Required content:",
-    "- Use negative findings AND watch findings tied to challenged checkpoints. A watch finding that weakens evidence quality belongs here as 'partially challenged'.",
-    "- Distinguish explicitly between four states where evidence supports them:",
-    "  (a) thesis pillar still intact,",
-    "  (b) quality of evidence weaker (e.g. profit growth supported by fair-value / other income rather than operations),",
-    "  (c) valuation support less clean (de-rating vs the original multiple anchor),",
-    "  (d) execution / rating risk higher.",
-    "- NEVER claim there is 'no evidence the thesis broke' when negative findings or challenged-checkpoint watch findings are present — describe precisely what weakened instead.",
-    "- Do not overstate: 'partially challenged' or 'less clean' is the right frame when nothing has outright broken.",
-    "- If genuinely nothing weakened, say so in two sentences max.",
-    "- `body`: max 2 short paragraphs. `bullets`: 3–4, each naming the specific pressure point (margin compression, profit quality, de-rating, demand risk) with numbers where sourced.",
-    "- Cite evidence via `sources[]` only — human labels in prose, never machine ids.",
-    "- `bridge`: omit. `signal`: `negative` when a pillar broke; `watch` when partially challenged.",
-  ].join("\n"),
-  sec_eps_bridge: [
-    "This is the 'EPS Credibility Bridge' section.",
-    "Required content:",
-    "- Bridge the original EPS estimate to the latest reported / revised EPS.",
-    "- Use financials/guidance/valuation findings and any watch findings that touch earnings quality.",
-    "- `bridge`: REQUIRED when at least one finding has source-anchored EPS / earnings numbers. Max 4–5 rows.",
-    "  Preferred metrics: prior EPS estimate, latest reported EPS, latest revised estimate, key delta drivers (margin, mix, one-offs, tax, other income).",
-    "- `body`: max 2 short paragraphs — explain the key delta lines. Cite evidence via `sources[]` only; human labels in prose ('the Q4 filing'), never machine ids.",
-    "- `bullets`: 3–4 max.",
-    "- If no relevant findings exist, say so in 2 sentences, set `confidence: low`, omit `bridge`, and stop.",
-  ].join("\n"),
-  sec_valuation_peer_gap: [
-    "This is the 'Valuation and Peer Gap' section.",
-    "Required content:",
-    "- Re-test the original valuation anchor (e.g. '50x Dec'27E EPS = INR 1,750') vs the latest valuation and peer set.",
-    "- Use valuation/peers findings and watch findings related to valuation.",
-    "- `bridge`: REQUIRED when valuation findings exist. Max 4–5 rows.",
-    "  Preferred metrics: original valuation anchor, current trading multiple, original target price / upside, current valuation read-through, peer multiple gap, whether the original PT/upside case still holds.",
-    "  When the current market price isn't verified from a primary source, write 'current price not verified from a primary source' rather than inventing a number.",
-    "- `body`: max 2 short paragraphs. `bullets`: 3–4 max. Cite evidence via `sources[]` only; human labels in prose, never machine ids.",
-    "- If no valuation/peers findings exist, say so in 2 sentences, set `confidence: low`, omit `bridge`, and stop.",
-  ].join("\n"),
-  sec_final_action: [
-    "This is the 'Final Investment Action' section. This is the synthesis section.",
-    "You will be given a digest of the prior section conclusions (Where the memo Held, Where it Broke, EPS Bridge, Valuation Peer Gap). Use that digest to drive the final call — do NOT re-derive from raw findings.",
+  sec_investment_action: [
+    "This is the 'Updated Investment View' section — the SYNTHESIS section and closing of the memo.",
+    "You will be given a digest of the prior section conclusions (Scorecard, What Changed, Shareholding, Industry, Corporate Events). Use that digest to drive the call — do NOT re-derive from raw findings.",
     "",
-    "The `body` MUST follow this structure:",
+    "The `body` MUST follow this structure (HARD):",
     "  Provisional action: ADD / HOLD / WATCH / REDUCE / AVOID",
+    "  Classification: Stronger than original memo / Broadly on track / Mixed but monitorable / Materially weakened / Broken thesis",
     "",
     "  Why:",
-    "  - 3 bullets max — number-led, evidence-based, drawn from the prior-section digest (thesis support, profit quality, valuation reset)",
+    "  - 3 bullets MAX — number-led, evidence-based, drawn from the prior-section digest.",
     "",
     "  What would change the call:",
-    "  - Positive: <2–4 concrete triggers, comma-separated>",
-    "  - Negative: <2–4 concrete triggers, comma-separated>",
+    "  - Positive: <2–3 concrete triggers, comma-separated>",
+    "  - Negative: <2–3 concrete triggers, comma-separated>",
     "",
-    "  Analyst sign-off required:",
-    "  - confirm audited numbers, segment margins, and source filings before client use",
+    "  Top 3 to monitor:",
+    "  - <trigger 1>",
+    "  - <trigger 2>",
+    "  - <trigger 3>",
     "",
-    "  Note: Draft for research support — not investment advice.",
+    "  Note: Draft for research support — not investment advice; analyst sign-off required.",
     "",
-    "The action label is explicitly PROVISIONAL — never present it as a final recommendation. The closing caveat line is REQUIRED, exactly as written, as the final line of the body.",
+    "The action label is explicitly PROVISIONAL. The closing caveat line is REQUIRED as the final line of the body, exactly as written.",
     "`bridge`: omit.",
-    "`bullets`: 3–4 short triggers (mirror the 'What would change the call' lines).",
+    "`bullets`: 3 short triggers (mirror the 'What would change the call' lines).",
     "No machine ids anywhere in the body or bullets.",
+  ].join("\n"),
+
+  // -------------------- SUPPLEMENTARY PANELS (3) -----------------
+  sup_valuation_detail: [
+    "This is the 'Valuation Detail — Then vs Now' SUPPLEMENTARY PANEL. It renders BELOW the memo as a collapsible drawer and is NOT counted against the 3-page memo budget. It still must stay tight.",
+    "Purpose: deeper valuation math — original multiple vs current multiple, target-price walk, peer-gap, multiple expansion/contraction attribution.",
+    "Required content:",
+    "- `bridge`: REQUIRED when valuation findings exist. 4–6 rows MAX. Preferred metrics:",
+    "  1. Original valuation anchor (e.g. '40x FY26E EPS = INR 800')",
+    "  2. Current trading multiple (verified)",
+    "  3. Implied price using ORIGINAL multiple on LATEST EPS",
+    "  4. Original target price / upside vs current upside",
+    "  5. Peer multiple gap (vs key 1–2 peers, average)",
+    "  6. Attribution: % of return from earnings growth vs multiple expansion/contraction",
+    "  When current price isn't verified from a primary source, write 'current price not verified from a primary source' rather than invent.",
+    "- `body`: 2 short paragraphs MAX. First paragraph: re-rating vs de-rating attribution. Second: whether the original target case still holds.",
+    "- `bullets`: 2–3 max.",
+    "- If no valuation/peers findings exist, say so in 2 sentences, set `confidence: low`, omit `bridge`, and stop.",
+    "- `signal`: `negative` for de-rating, `positive` for re-rating, `watch` for mixed.",
+  ].join("\n"),
+  sup_eps_bridge: [
+    "This is the 'EPS Credibility Bridge' SUPPLEMENTARY PANEL — collapsible drawer below the memo.",
+    "Required content:",
+    "- `bridge`: REQUIRED when EPS / earnings findings exist. 4–6 rows MAX. Preferred metrics in this order:",
+    "  1. Prior EPS estimate (from the memo)",
+    "  2. Latest REPORTED EPS",
+    "  3. Latest revised estimate (where sourced)",
+    "  4. Key delta driver: margin",
+    "  5. Key delta driver: mix / segment",
+    "  6. Key delta driver: one-offs / tax / other income",
+    "- `body`: 2 short paragraphs MAX — explain the key delta lines in number-led prose.",
+    "- `bullets`: 2–3 max.",
+    "- If no relevant findings exist, say so in 2 sentences, set `confidence: low`, omit `bridge`, and stop.",
+  ].join("\n"),
+  sup_financials_actuals: [
+    "This is the 'Memo Forecasts vs Reported Financials' SUPPLEMENTARY PANEL — collapsible drawer below the memo.",
+    "Required content:",
+    "- `bridge`: REQUIRED when financials/guidance findings exist. 4–8 rows. Each row compares a memo-stated forecast vs the latest reported number. Preferred metrics:",
+    "  Revenue, EBITDA, EBITDA margin, PAT, EPS, Operating cash flow, Net debt / cash, Working-capital days (whichever the memo anchored on).",
+    "  - `original` cell: memo's stated expectation or assumption.",
+    "  - `latest` cell: latest reported actual.",
+    "  - `readThrough` cell: ONE phrase — 'memo too optimistic on margin' / 'memo conservative on growth' / 'broadly tracking', etc.",
+    "- `body`: ONE short paragraph that interprets WHY the memo was right or wrong — divisional vs P&L vs balance-sheet vs cash-flow drivers (≤ 100 words).",
+    "- `bullets`: omit (the bridge IS the content).",
+    "- If no relevant findings exist, say so in 2 sentences, set `confidence: low`, omit `bridge`, and stop.",
   ].join("\n"),
 };
 
@@ -201,7 +247,7 @@ export function buildSectionPrompt(
   if (req.retryCompact) {
     systemLines.push(
       "",
-      "Compact retry: produce tighter prose. Trim bullets to 3 max, body to one short paragraph, sources to the most important 2–3.",
+      "Compact retry: produce tighter prose. Trim bullets to 2 max, body to one short paragraph, sources to the most important 2.",
     );
   }
 
@@ -381,14 +427,14 @@ function buildUserPrompt(req: GenerateMemoSectionRequest): string {
   }
 
   if (
-    sectionId === "sec_final_action" &&
+    sectionId === "sec_investment_action" &&
     priorSectionsDigest &&
     priorSectionsDigest.length > 0
   ) {
     lines.push("");
     lines.push("# 5b. Prior section conclusions");
     lines.push(
-      "Use these to compute the Provisional action / Confidence / Why bullets / What would change the call.",
+      "Use these to compute the Provisional action / Classification / Why bullets / What would change the call / Top 3 to monitor.",
     );
     for (const d of priorSectionsDigest) {
       const conf = d.confidence ? `, confidence=${d.confidence}` : "";
@@ -456,27 +502,26 @@ function truncate(value: string, max: number): string {
 }
 
 // Phase 6A: memo-understanding anchor block for section prompts.
-// Provides the section model with:
-//   - the original memo's one-line thesis + recommendation/target
-//   - top thesis pillars (must_check first)
-//   - top flagged details (importance-sorted)
-//   - original valuation framework
-//   - section-relevant financial claims (sec_q4_retest /
-//     sec_eps_bridge / sec_valuation_peer_gap)
-// This makes the section answer "does the memo still hold?" anchored on
-// the memo's specific claims rather than drifting generic.
-const MEMO_HELD_BROKE_SECTIONS = new Set<CanonicalSectionId>([
-  "sec_memo_held",
-  "sec_memo_broke",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
-  "sec_final_action",
+// Provides the section model with the original memo's anchor — thesis
+// pillars, flagged details, financial claims — so the section can answer
+// "does the memo still hold?" rather than drift generic.
+const MEMO_ANCHOR_SECTIONS = new Set<CanonicalSectionId>([
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
+  "sec_investment_action",
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
 ]);
 
 const FINANCIALS_SECTIONS = new Set<CanonicalSectionId>([
-  "sec_q4_retest",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
+  "sec_thesis_scorecard",
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
 ]);
 
 function appendMemoUnderstandingContext(
@@ -528,7 +573,7 @@ function appendMemoUnderstandingContext(
       );
     }
   }
-  if (MEMO_HELD_BROKE_SECTIONS.has(sectionId)) {
+  if (MEMO_ANCHOR_SECTIONS.has(sectionId)) {
     lines.push(
       "Use these anchors to evaluate whether the memo still holds — do NOT drift into generic company commentary. Tie each section claim back to a specific pillar / flag / claim above.",
     );

@@ -11,16 +11,17 @@ import type {
 } from "@shared/types";
 import { CANONICAL_SECTION_TITLES } from "./sectionPrompt";
 
+// Phase 6B: 6 core + 3 supplementary; renderer splits on prefix.
 const CANONICAL_SECTION_IDS = [
-  "sec_thesis_snapshot",
-  "sec_q4_retest",
-  "sec_mgmt_retest",
-  "sec_ai_macro_risk",
-  "sec_memo_held",
-  "sec_memo_broke",
-  "sec_eps_bridge",
-  "sec_valuation_peer_gap",
-  "sec_final_action",
+  "sec_thesis_scorecard",
+  "sec_what_changed",
+  "sec_shareholding",
+  "sec_industry_regulatory",
+  "sec_corporate_events",
+  "sec_investment_action",
+  "sup_valuation_detail",
+  "sup_eps_bridge",
+  "sup_financials_actuals",
 ] as const;
 
 const SIGNAL_VALUES: MemoSectionSignal[] = [

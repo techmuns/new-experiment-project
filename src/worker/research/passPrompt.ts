@@ -48,12 +48,13 @@ const SHARED_SYSTEM_LINES = [
 
 const PASS_BLOCKS: Record<ResearchPassId, string> = {
   official_results: [
-    "Pass: OFFICIAL RESULTS / EXCHANGE FILINGS.",
-    "Scope: find the company's LATEST quarterly / annual / interim official results, audited financials, exchange filings.",
-    "Preferred sources: company investor relations page, BSE/NSE/SEC/SEBI filings, official earnings releases, 10-K/10-Q/20-F documents.",
+    "Pass: OFFICIAL RESULTS / EXCHANGE FILINGS / SHAREHOLDING PATTERN.",
+    "Scope: this pass MUST cover BOTH (a) latest quarterly / annual / interim official results AND (b) the company's latest SHAREHOLDING PATTERN filing.",
+    "Preferred sources: company investor relations page, BSE/NSE/SEC/SEBI filings, official earnings releases, 10-K/10-Q/20-F documents, BSE/NSE shareholding-pattern filings, Screener.in 'Shareholding' page (treat as aggregator of filings).",
     "Categories: financials, filings, guidance.",
-    "Target 1–3 findings. Each finding should anchor on official documentation, not press summaries.",
-    "If only press summaries exist (no primary doc), emit a single coverage-gap finding (impact: neutral, category: 'filings') saying so.",
+    "Target 2–4 findings. At least ONE finding MUST cover the shareholding pattern (category: 'filings'). Anchor on official documentation, not press summaries.",
+    "For the shareholding-pattern finding, you MUST quote SPECIFIC percentages AND, where the filing or Screener.in surfaces them, NAMED institutional holders (e.g. 'HDFC Mutual Fund added 1.4 ppt to 3.1%', 'Government Pension Fund Global exited'). Do NOT invent fund names. Cover, in this order: promoter holding + pledge, FII holding (name top movers if surfaced), DII / mutual fund holding (name top movers), public/retail, plus any QIP / preferential / buyback / insider trade visible.",
+    "If only press summaries exist (no primary doc), emit a coverage-gap finding (impact: neutral, category: 'filings') saying so — but still ATTEMPT the shareholding-pattern finding before giving up.",
   ].join("\n"),
   management_call: [
     "Pass: EARNINGS CALL / MANAGEMENT COMMENTARY.",

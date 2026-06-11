@@ -111,7 +111,13 @@ export interface FollowUpMemo {
   projectId: string;
   title: string;
   generatedAt: string;
+  // Phase 6B: the CORE memo body — six sec_* sections printed in the
+  // <3-page memo. The renderer (MemoReview) shows these as the memo.
   sections: MemoSection[];
+  // Phase 6B: supplementary sup_* panels (Valuation Detail, EPS Bridge,
+  // Memo-vs-Actual Financials). Rendered as collapsible drawers BELOW
+  // the memo so the printed memo body stays under three pages.
+  supplementaryPanels?: MemoSection[];
   isDemo: boolean;
   // Single sink for residual manual-check items, rendered once at the
   // foot of the memo. Replaces per-section "Needs manual verification."
@@ -570,16 +576,30 @@ export type LlmGenerationState =
 
 // ---------- Phase 5D additions: section-by-section memo generation ----------
 
+// Phase 6B: memo restructured for client feedback (June 2026).
+// The follow-up memo is now SIX core "sec_" sections (printed as the
+// <3-page memo) plus THREE "sup_" supplementary panels (rendered as
+// collapsible drawers BELOW the memo for the deep valuation/EPS/peer
+// math that would push the memo over three pages).
+// Worker schemas continue to expect nine canonical entries — the renderer
+// (MemoReview) splits on the id prefix.
 export type CanonicalSectionId =
-  | "sec_thesis_snapshot"
-  | "sec_q4_retest"
-  | "sec_mgmt_retest"
-  | "sec_ai_macro_risk"
-  | "sec_memo_held"
-  | "sec_memo_broke"
-  | "sec_eps_bridge"
-  | "sec_valuation_peer_gap"
-  | "sec_final_action";
+  // Core memo sections (rendered in the <3-page memo body)
+  | "sec_thesis_scorecard"
+  | "sec_what_changed"
+  | "sec_shareholding"
+  | "sec_industry_regulatory"
+  | "sec_corporate_events"
+  | "sec_investment_action"
+  // Supplementary panels (rendered as collapsible drawers below the memo)
+  | "sup_valuation_detail"
+  | "sup_eps_bridge"
+  | "sup_financials_actuals";
+
+// Helper: true if the section id belongs to the core <3-page memo body
+// (vs a supplementary drawer). Used by MemoReview to split rendering.
+export const CORE_MEMO_SECTION_PREFIX = "sec_";
+export const SUPPLEMENTARY_PANEL_PREFIX = "sup_";
 
 export interface MemoSectionDigestEntry {
   id: CanonicalSectionId;
@@ -607,10 +627,10 @@ export interface GenerateMemoSectionRequest {
   styleSample?: string[];
   initialMemoId?: string;
   priorSectionsDigest?: MemoSectionDigestEntry[];
-  // Phase 6A: optional MemoUnderstanding digest. When present, section
+  // Phase 6A/6B: optional MemoUnderstanding digest. When present, section
   // prompts add memo-specific anchors (thesis pillars, flagged details,
-  // valuation framework) for sec_memo_held / sec_memo_broke / sec_eps_bridge
-  // / sec_valuation_peer_gap / sec_final_action.
+  // valuation framework) — used by every core sec_* section + the three
+  // supplementary sup_* panels.
   memoUnderstandingDigest?: MemoUnderstandingDigest;
   retryCompact?: boolean;
 }

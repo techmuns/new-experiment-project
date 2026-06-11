@@ -251,12 +251,15 @@ export function selectClaimsForSection(
 ): MemoUnderstandingDigest["financialClaims"] {
   if (!digest.financialClaims || digest.financialClaims.length === 0) return [];
   const claims = digest.financialClaims;
-  // Sections that consume financial claims: sec_q4_retest, sec_eps_bridge,
-  // sec_valuation_peer_gap. Other sections can use them as context.
+  // Phase 6B: sections that consume financial claims as the spine:
+  // sec_thesis_scorecard (memo-vs-reality bridge), sup_eps_bridge,
+  // sup_valuation_detail, sup_financials_actuals. Other sections can use
+  // them as context (3 claims max).
   if (
-    sectionId === "sec_q4_retest" ||
-    sectionId === "sec_eps_bridge" ||
-    sectionId === "sec_valuation_peer_gap"
+    sectionId === "sec_thesis_scorecard" ||
+    sectionId === "sup_eps_bridge" ||
+    sectionId === "sup_valuation_detail" ||
+    sectionId === "sup_financials_actuals"
   ) {
     return claims.slice(0, 4);
   }

@@ -69,33 +69,32 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_TOKENS = 5_000;
 const COMPACT_MAX_OUTPUT_TOKENS = 3_500;
 const HARD_MAX_OUTPUT_TOKENS = 12_000;
-// Phase 5F: per-section output budgets. Bumped vs Phase 5D's flat
-// 1_000 / 600 to give bridge-required sections (sec_q4_retest,
-// sec_eps_bridge, sec_valuation_peer_gap) headroom to emit their full
-// JSON without truncation. Lighter sections stay near the Phase 5D
-// budget. Compact is the budget used on the orchestrator's retryCompact
-// attempt.
+// Phase 6B: per-section output budgets for the restructured memo.
+// Core sec_* sections are TIGHTER than Phase 5/6A to enforce the
+// <3-page memo budget. Supplementary sup_* panels get more headroom
+// because they carry the deeper bridges (valuation, EPS, financials).
+// Compact is the budget used on the orchestrator's retryCompact attempt.
 const SECTION_MAX_OUTPUT_TOKENS: Record<CanonicalSectionId, number> = {
-  sec_thesis_snapshot: 1_000,
-  sec_q4_retest: 1_500,
-  sec_mgmt_retest: 1_000,
-  sec_ai_macro_risk: 1_000,
-  sec_memo_held: 1_100,
-  sec_memo_broke: 1_100,
-  sec_eps_bridge: 1_500,
-  sec_valuation_peer_gap: 1_500,
-  sec_final_action: 1_200,
+  sec_thesis_scorecard: 1_300,
+  sec_what_changed: 900,
+  sec_shareholding: 1_100,
+  sec_industry_regulatory: 900,
+  sec_corporate_events: 900,
+  sec_investment_action: 1_100,
+  sup_valuation_detail: 1_500,
+  sup_eps_bridge: 1_500,
+  sup_financials_actuals: 1_700,
 };
 const SECTION_COMPACT_MAX_OUTPUT_TOKENS: Record<CanonicalSectionId, number> = {
-  sec_thesis_snapshot: 700,
-  sec_q4_retest: 1_000,
-  sec_mgmt_retest: 700,
-  sec_ai_macro_risk: 700,
-  sec_memo_held: 800,
-  sec_memo_broke: 800,
-  sec_eps_bridge: 1_000,
-  sec_valuation_peer_gap: 1_000,
-  sec_final_action: 900,
+  sec_thesis_scorecard: 900,
+  sec_what_changed: 600,
+  sec_shareholding: 800,
+  sec_industry_regulatory: 600,
+  sec_corporate_events: 600,
+  sec_investment_action: 800,
+  sup_valuation_detail: 1_000,
+  sup_eps_bridge: 1_000,
+  sup_financials_actuals: 1_200,
 };
 const SECTION_FORMAT_NAME = "memo_section";
 // Phase 5C: pre-call auto-compact guard. If the default-trim assembled
