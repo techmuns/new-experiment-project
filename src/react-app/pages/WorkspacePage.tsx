@@ -214,7 +214,9 @@ export function WorkspacePage() {
                     : state.understanding.kind === "error"
                       ? state.understanding.code === "timeout"
                         ? "Memo analysis timed out. Rerun compact memo analysis above so research stays memo-specific."
-                        : "Memo analysis failed. Rerun memo analysis above so research stays memo-specific."
+                        : state.understanding.code === "parse_error"
+                          ? "Memo analysis returned malformed JSON. Rerun compact memo analysis above so research stays memo-specific."
+                          : "Memo analysis failed. Rerun memo analysis above so research stays memo-specific."
                       : "Memo analysis hasn't run yet."}
                 </div>
               )}

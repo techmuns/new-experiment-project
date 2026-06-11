@@ -126,17 +126,24 @@ export function MemoUnderstandingCard({
   }
 
   if (state.kind === "error") {
-    // Phase 6A.1: timeout gets specific copy + a "Rerun compact memo
-    // analysis" button label so the user understands the retry is the
-    // compact-first path (not a different mode).
+    // Phase 6A.1 added timeout-specific copy. Phase 6A.2 adds parse_error
+    // copy distinct from the generic error branch. Both retry paths use
+    // the "Rerun compact memo analysis" label so the user understands
+    // the retry is the compact-first path.
     const isTimeout = state.code === "timeout";
+    const isParseError = state.code === "parse_error";
     const headline = isTimeout
       ? "Memo analysis timed out. Try compact rerun."
-      : "We couldn't extract a structured understanding of this memo.";
+      : isParseError
+        ? "Memo analysis returned malformed JSON."
+        : "We couldn't extract a structured understanding of this memo.";
     const subtitle = isTimeout
       ? "We couldn't finish the memo analysis in time. Rerun keeps it compact and is usually faster."
-      : null;
-    const rerunLabel = isTimeout ? "Rerun compact memo analysis" : "Rerun memo analysis";
+      : isParseError
+        ? "The model response was not valid structured data. Rerun compact memo analysis to repair the output."
+        : null;
+    const rerunLabel =
+      isTimeout || isParseError ? "Rerun compact memo analysis" : "Rerun memo analysis";
     return (
       <Frame title="Memo intelligence · Understanding failed">
         <div className="flex items-start gap-2 text-[12.5px] text-[var(--color-warning)] leading-snug">

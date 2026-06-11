@@ -6,15 +6,22 @@
 // - OpenAI only (provider_missing otherwise).
 // - NO web_search, NO tools, NO tool_choice, NO include.
 // - Strict JSON schema (Responses API json_schema, strict: true).
-// - Extract+repair ladder: extractFirstJsonObject → strict shape → if fail,
-//   ONE focused repair OpenAI call → strict shape → if still fail,
-//   parse_error.
-// - max_output_tokens: 4_000 normal / 2_500 repair.
-// - Counts-only logging. NEVER log memo text, raw output, prompts, API
-//   key, or c.env.
+// - Phase 6A.2 reliability ladder:
+//     primary call (normal compact schema, JSON-only prompt)
+//       → extractFirstJsonObject on raw output (handles fences/prose)
+//       → strict shape
+//       → if shape fails: repair OpenAI call (stronger JSON-only prompt)
+//       → extractFirstJsonObject on repair output (handles fences/prose)
+//       → strict shape
+//       → if everything fails: ultra-compact second-attempt path
+//         (minimal-surface schema + expand-into-full)
+//       → if ultra-compact also fails: safe parse_error
+// - Counts-only logging with `outcome` tag identifying which tier
+//   succeeded (primary / primary_extract / repair / repair_extract /
+//   ultra_compact / parse_error). NEVER log memo text, raw output,
+//   prompts, API key, or c.env.
 import type { Context } from "hono";
 import type {
-  LlmGenerationWarning,
   LlmProviderName,
   MemoUnderstandErrorCode,
   MemoUnderstandRequest,
@@ -35,10 +42,18 @@ import {
 } from "./schema";
 import { parseUnderstandJson } from "./parse";
 import { trimForUnderstanding } from "./trim";
+import {
+  MEMO_UNDERSTANDING_ULTRA_COMPACT_FORMAT_NAME,
+  MEMO_UNDERSTANDING_ULTRA_COMPACT_OPENAI_SCHEMA,
+  buildUltraCompactPrompt,
+  expandUltraCompactToFull,
+  parseUltraCompactJson,
+} from "./ultraCompact";
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const UNDERSTAND_MAX_OUTPUT_TOKENS = 2_400;
 const UNDERSTAND_REPAIR_MAX_OUTPUT_TOKENS = 1_600;
+const UNDERSTAND_ULTRA_COMPACT_MAX_OUTPUT_TOKENS = 1_200;
 const GATE_HEADER = "x-memo-llm-gate";
 
 export async function handleMemoUnderstand(
@@ -212,6 +227,7 @@ export async function handleMemoUnderstand(
       );
     }
 
+    logOutcome("primary", validation.value.project.id);
     const body: MemoUnderstandResponse = {
       ok: true,
       understanding: shape.understanding,
@@ -267,22 +283,13 @@ async function tryRepair(
     const normalized = normalizeUnderstandingNulls(extracted.value);
     const shape = parseUnderstandJson(normalized, request.project.id);
     if (shape.ok) {
-      const warnings: LlmGenerationWarning[] = [
-        {
-          code: "schema_warning",
-          message: "Recovered memo understanding via JSON extract.",
-        },
-      ];
-      const body: MemoUnderstandResponse = {
-        ok: true,
-        understanding: shape.understanding,
-        providerMetadata: {
-          providerName: "openai",
-          modelUsed: readiness.model ?? "unknown",
-        },
-        warnings,
-      };
-      return c.json(body);
+      return c.json(buildOkResponse(
+        shape.understanding,
+        readiness.model,
+        "Recovered memo understanding via JSON extract.",
+        "primary_extract",
+        request.project.id,
+      ));
     }
   }
 
@@ -300,6 +307,31 @@ async function tryRepair(
   });
 
   if (!repair.ok) {
+    // Repair didn't return a parsed object at all. If it was non-JSON
+    // ("malformed_output" with rawText), the route's primary-tier
+    // extract+strict-shape can't help — but the ultra-compact tier
+    // might. Other terminal codes (timeout, rate_limited, not_configured)
+    // fall straight through to safe failure.
+    if (
+      repair.code === "malformed_output" &&
+      typeof repair.rawText === "string"
+    ) {
+      const extractedRepair = extractFirstJsonObject(repair.rawText);
+      if (extractedRepair.ok) {
+        const normalizedExtracted = normalizeUnderstandingNulls(extractedRepair.value);
+        const shapeExtracted = parseUnderstandJson(normalizedExtracted, request.project.id);
+        if (shapeExtracted.ok) {
+          return c.json(buildOkResponse(
+            shapeExtracted.understanding,
+            readiness.model,
+            "Memo understanding recovered via JSON repair (extract).",
+            "repair_extract",
+            request.project.id,
+          ));
+        }
+      }
+      return await tryUltraCompact(c, request, readiness, apiKey, "repair_malformed");
+    }
     return c.json(
       buildSafeFailure(
         translateProviderFailToUnderstandCode(repair.code),
@@ -312,43 +344,184 @@ async function tryRepair(
 
   const normalized = normalizeUnderstandingNulls(repair.parsed);
   const shape = parseUnderstandJson(normalized, request.project.id);
-  if (!shape.ok) {
-    return c.json(
-      buildSafeFailure(
-        "parse_error",
-        shape.message,
-        "openai",
-        readiness.model,
-      ),
-    );
+  if (shape.ok) {
+    logOutcome("repair", request.project.id);
+    const body: MemoUnderstandResponse = {
+      ok: true,
+      understanding: shape.understanding,
+      providerMetadata: {
+        providerName: "openai",
+        modelUsed: readiness.model ?? "unknown",
+        inputTokens: repair.inputTokens,
+        outputTokens: repair.outputTokens,
+      },
+      warnings: [
+        {
+          code: "schema_warning",
+          message: "Memo understanding recovered via JSON repair.",
+        },
+      ],
+    };
+    return c.json(body);
   }
-  const warnings: LlmGenerationWarning[] = [
-    {
-      code: "schema_warning",
-      message: "Memo understanding recovered via JSON repair.",
-    },
-  ];
-  const body: MemoUnderstandResponse = {
+
+  // Repair JSON parsed but the strict shape rejected it. Try
+  // extractFirstJsonObject on the serialized repair output (catches
+  // cases where the repair model wrapped extra prose around the JSON
+  // despite the explicit instructions).
+  const repairSerialized = JSON.stringify(repair.parsed);
+  const extractedRepairShape = extractFirstJsonObject(repairSerialized);
+  if (extractedRepairShape.ok) {
+    const normalizedExtracted = normalizeUnderstandingNulls(extractedRepairShape.value);
+    const shapeExtracted = parseUnderstandJson(normalizedExtracted, request.project.id);
+    if (shapeExtracted.ok) {
+      return c.json(buildOkResponse(
+        shapeExtracted.understanding,
+        readiness.model,
+        "Memo understanding recovered via JSON repair (extract).",
+        "repair_extract",
+        request.project.id,
+      ));
+    }
+  }
+
+  // Repair shape still failed — last resort is the ultra-compact tier.
+  return await tryUltraCompact(c, request, readiness, apiKey, "repair_shape_failed");
+}
+
+function buildOkResponse(
+  understanding: import("@shared/types").MemoUnderstanding,
+  modelUsed: string | undefined,
+  warningMessage: string,
+  outcome: string,
+  projectId: string,
+): MemoUnderstandResponse {
+  logOutcome(outcome, projectId);
+  return {
     ok: true,
-    understanding: shape.understanding,
+    understanding,
     providerMetadata: {
       providerName: "openai",
-      modelUsed: readiness.model ?? "unknown",
-      inputTokens: repair.inputTokens,
-      outputTokens: repair.outputTokens,
+      modelUsed: modelUsed ?? "unknown",
     },
-    warnings,
+    warnings: [
+      {
+        code: "schema_warning",
+        message: warningMessage,
+      },
+    ],
   };
-  return c.json(body);
+}
+
+function logOutcome(outcome: string, projectId: string): void {
+  console.log(
+    JSON.stringify({
+      event: "llm_understand_outcome",
+      projectId,
+      outcome,
+    }),
+  );
+}
+
+async function tryUltraCompact(
+  c: Context<{ Bindings: Env }>,
+  request: MemoUnderstandRequest,
+  readiness: ReturnType<typeof evaluateLlmReadiness>,
+  apiKey: string,
+  reason: string,
+): Promise<Response> {
+  console.log(
+    JSON.stringify({
+      event: "llm_understand_ultra_compact_enter",
+      projectId: request.project.id,
+      reason,
+    }),
+  );
+
+  // Re-trim the memo with the same cap (cheap; trim is pure).
+  const trim = trimForUnderstanding(request.memo.text);
+  const prompt = buildUltraCompactPrompt(request, trim.text);
+
+  const call = await callOpenAIResponses({
+    apiKey,
+    model: readiness.model ?? "",
+    system: prompt.system,
+    user: prompt.user,
+    schema: MEMO_UNDERSTANDING_ULTRA_COMPACT_OPENAI_SCHEMA,
+    schemaName: MEMO_UNDERSTANDING_ULTRA_COMPACT_FORMAT_NAME,
+    maxTokens: UNDERSTAND_ULTRA_COMPACT_MAX_OUTPUT_TOKENS,
+    abortSignal: c.req.raw.signal,
+    logEventTag: "llm_understand_ultra_compact",
+  });
+
+  let parsedObject: unknown = null;
+  if (call.ok) {
+    parsedObject = call.parsed;
+  } else if (
+    call.code === "malformed_output" &&
+    typeof call.rawText === "string"
+  ) {
+    const extracted = extractFirstJsonObject(call.rawText);
+    if (extracted.ok) {
+      parsedObject = extracted.value;
+    }
+  }
+
+  if (parsedObject !== null) {
+    const uc = parseUltraCompactJson(parsedObject, request.project.id);
+    if (uc.ok) {
+      const expanded = expandUltraCompactToFull(
+        uc.value,
+        request.project.id,
+        request.project.companyName,
+        request.project.ticker,
+      );
+      logOutcome("ultra_compact", request.project.id);
+      const body: MemoUnderstandResponse = {
+        ok: true,
+        understanding: expanded,
+        providerMetadata: {
+          providerName: "openai",
+          modelUsed: readiness.model ?? "unknown",
+          inputTokens: call.ok ? call.inputTokens : undefined,
+          outputTokens: call.ok ? call.outputTokens : undefined,
+        },
+        warnings: [
+          {
+            code: "schema_warning",
+            message: "Memo understanding recovered via ultra-compact second attempt.",
+          },
+        ],
+      };
+      return c.json(body);
+    }
+  }
+
+  // Ultra-compact also failed. Return safe parse_error.
+  logOutcome("parse_error", request.project.id);
+  return c.json(
+    buildSafeFailure(
+      "parse_error",
+      "Memo understanding could not be parsed after primary, repair, and ultra-compact attempts.",
+      "openai",
+      readiness.model,
+    ),
+  );
 }
 
 const REPAIR_SYSTEM = [
-  "You are a JSON repair assistant. Convert the user-supplied draft into a single valid JSON object that matches the MemoUnderstanding schema exactly.",
-  "Preserve every fact present in the draft — numbers, dates, claims, quotes.",
-  "Do NOT add new facts. Do NOT change meaning. Do NOT invent values.",
+  "You are a JSON repair assistant. Convert the user-supplied draft into a single valid JSON object that exactly matches the MemoUnderstanding schema.",
+  "Preserve every fact present in the draft — numbers, dates, claims, quotes. Do NOT add new facts. Do NOT invent missing details. Do NOT change meaning. Preserve only information already present in the draft.",
   "If the draft is truncated mid-array or mid-string, OMIT the incomplete tail rather than invent a completion.",
   "For required fields the draft omits entirely: leave string fields as empty string, list fields as empty array, nullable fields as null.",
-  "Emit a SINGLE JSON object. No prose outside the JSON. No code fences.",
+  "",
+  "JSON-ONLY OUTPUT DISCIPLINE — your response is consumed by a strict parser. ANY deviation breaks the user's session.",
+  "  - Output raw JSON only. No prose, no preamble, no commentary, no apology.",
+  "  - Do NOT wrap the JSON in markdown fences (no ```json, no ```).",
+  "  - The FIRST character of your response MUST be `{`.",
+  "  - The LAST character of your response MUST be `}`.",
+  "  - Double quotes for all keys and strings. No trailing commas. No `undefined` values.",
+  "  - Use `null` only where the schema allows null. Use empty arrays `[]` when no items are found.",
 ].join("\n");
 
 function buildRepairUser(rawText: string, projectId: string): string {
