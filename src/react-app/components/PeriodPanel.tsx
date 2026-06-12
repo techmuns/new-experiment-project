@@ -10,7 +10,8 @@ const CONFIDENCE_TONE = {
 } as const;
 
 export function PeriodPanel() {
-  const { state, effectiveDetection, setPeriodOverride } = useMemoProject();
+  const { state, effectiveDetection, setPeriodOverride, setSelectedCompany } =
+    useMemoProject();
   const detection = state.detection;
   const eff = effectiveDetection;
   if (!detection || !eff) return null;
@@ -44,7 +45,7 @@ export function PeriodPanel() {
           label="Detected company"
           value={eff.detectedCompany}
           placeholder="(detected from memo or filename)"
-          onChange={(v) => setPeriodOverride({ detectedCompany: v })}
+          onChange={(v) => setSelectedCompany(v)}
         />
         <Field
           label="Latest period (label only)"

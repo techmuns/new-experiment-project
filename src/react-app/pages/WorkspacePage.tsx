@@ -18,6 +18,7 @@ import type {
 } from "@shared/types";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { CompanyFilter } from "../components/CompanyFilter";
 import { Hero } from "../components/ui/Hero";
 import { Panel } from "../components/ui/Panel";
 import { UploadSlot } from "../components/ui/UploadSlot";
@@ -169,6 +170,10 @@ export function WorkspacePage() {
 
   return (
     <div className="space-y-6">
+      {/* Company filter — top-of-workspace selector for the company this
+          memo covers. Authoritative for the whole pipeline. */}
+      <CompanyFilter />
+
       {/* Pre-upload intro — disappears once a file is loaded so the rest
           of the workflow rises above the fold. */}
       {showIntroHero && (

@@ -12,6 +12,7 @@ import type {
 // state; the consumer maps from useMemoProject() to this shape.
 export interface CommandBarStateSlice {
   detection: PeriodDetectionResult | null;
+  selectedCompany: string | null;
   periodOverride: { detectedCompany?: string };
   extraction: { source: { filename: string } } | null;
   dna: MemoDNA | null;
@@ -32,8 +33,9 @@ export function deriveCommandBarValues(
   state: CommandBarStateSlice,
 ): CommandBarValues {
   const effectiveCompany = (
-    state.periodOverride.detectedCompany ??
-    state.detection?.detectedCompany ??
+    state.selectedCompany?.trim() ||
+    state.periodOverride.detectedCompany ||
+    state.detection?.detectedCompany ||
     ""
   ).trim();
   const trailingTicker = state.detection?.detectedTicker?.trim() || undefined;

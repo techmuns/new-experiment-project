@@ -94,6 +94,10 @@ interface State {
   // test?" priorities textbox. Threaded into every research pass and
   // every memo section so the memo addresses what the user asked.
   userResearchPriorities: string;
+  // Company the user explicitly selected at the top of the workspace as
+  // the subject of the memo. When set it overrides the company auto-
+  // detected from the memo and survives a new upload.
+  selectedCompany: string | null;
 }
 
 type Action =
@@ -163,6 +167,7 @@ type Action =
     }
   | { type: "SET_SKIP_UNDERSTANDING"; value: boolean }
   | { type: "SET_USER_RESEARCH_PRIORITIES"; value: string }
+  | { type: "SET_SELECTED_COMPANY"; company: string | null }
   | { type: "RESET" };
 
 function buildInitialProgress(): MemoGenerationProgress {
@@ -211,6 +216,7 @@ const initialState: State = {
   understanding: { kind: "idle" },
   skipUnderstanding: false,
   userResearchPriorities: "",
+  selectedCompany: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -468,6 +474,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, skipUnderstanding: action.value };
     case "SET_USER_RESEARCH_PRIORITIES":
       return { ...state, userResearchPriorities: action.value };
+    case "SET_SELECTED_COMPANY":
+      return { ...state, selectedCompany: action.company };
     case "RESET":
       return {
         ...initialState,
@@ -509,6 +517,8 @@ interface MemoProjectContextValue {
   skipMemoUnderstanding: () => void;
   // Phase 6C
   setUserResearchPriorities: (value: string) => void;
+  // Company selector (top-of-workspace filter)
+  setSelectedCompany: (company: string | null) => void;
 }
 
 const Ctx = createContext<MemoProjectContextValue | null>(null);
@@ -607,8 +617,9 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
   const runMemoUnderstandingOrchestrated = useCallback(async (): Promise<void> => {
     if (!state.dna || !state.extraction || !state.initialFile) return;
     const companyName =
-      state.periodOverride.detectedCompany ??
-      state.detection?.detectedCompany ??
+      state.selectedCompany?.trim() ||
+      state.periodOverride.detectedCompany ||
+      state.detection?.detectedCompany ||
       state.initialFile.filename.replace(/\.[^.]+$/, "");
     const ticker = state.detection?.detectedTicker;
     const detection = state.detection
@@ -678,6 +689,7 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     state.initialFile,
     state.detection,
     state.periodOverride.detectedCompany,
+    state.selectedCompany,
   ]);
 
   const runMemoUnderstanding = useCallback(
@@ -694,6 +706,10 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
 
   const setUserResearchPriorities = useCallback((value: string): void => {
     dispatch({ type: "SET_USER_RESEARCH_PRIORITIES", value });
+  }, []);
+
+  const setSelectedCompany = useCallback((company: string | null): void => {
+    dispatch({ type: "SET_SELECTED_COMPANY", company });
   }, []);
 
   // Auto-run memo understanding once DNA + extraction are ready and the
@@ -728,8 +744,9 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
       if (!periodLabel) return;
 
       const companyName =
-        state.periodOverride.detectedCompany ??
-        state.detection?.detectedCompany ??
+        state.selectedCompany?.trim() ||
+        state.periodOverride.detectedCompany ||
+        state.detection?.detectedCompany ||
         state.initialFile.filename.replace(/\.[^.]+$/, "");
       const aliases = buildCompanyAliases(
         state.detection,
@@ -865,6 +882,7 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
       state.researchProgress.failedPassIds,
       state.understanding,
       state.userResearchPriorities,
+      state.selectedCompany,
     ],
   );
 
@@ -890,8 +908,9 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     ): Promise<void> => {
       if (!state.dna || !state.extraction || !state.initialFile) return;
       const companyName =
-        state.periodOverride.detectedCompany ??
-        state.detection?.detectedCompany ??
+        state.selectedCompany?.trim() ||
+        state.periodOverride.detectedCompany ||
+        state.detection?.detectedCompany ||
         state.initialFile.filename.replace(/\.[^.]+$/, "");
       const periodLabel =
         state.periodOverride.periodLabel ??
@@ -1017,6 +1036,7 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
       state.completedSections,
       state.understanding,
       state.userResearchPriorities,
+      state.selectedCompany,
     ],
   );
 
@@ -1051,8 +1071,9 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     const effectiveDetection = state.detection
       ? {
           detectedCompany:
-            state.periodOverride.detectedCompany ??
-            state.detection.detectedCompany ??
+            state.selectedCompany?.trim() ||
+            state.periodOverride.detectedCompany ||
+            state.detection.detectedCompany ||
             "",
           periodLabel:
             state.periodOverride.periodLabel ??
@@ -1083,6 +1104,7 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
       rerunMemoUnderstanding,
       skipMemoUnderstanding,
       setUserResearchPriorities,
+      setSelectedCompany,
     };
   }, [
     state,
@@ -1101,6 +1123,7 @@ export function MemoProjectProvider({ children }: { children: ReactNode }) {
     rerunMemoUnderstanding,
     skipMemoUnderstanding,
     setUserResearchPriorities,
+    setSelectedCompany,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

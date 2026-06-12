@@ -22,6 +22,7 @@ export function CommandBar() {
   const { projectLabel, trailingTicker, stageLabel, stageTone } =
     deriveCommandBarValues({
       detection: state.detection,
+      selectedCompany: state.selectedCompany,
       periodOverride: state.periodOverride,
       extraction: state.extraction
         ? { source: { filename: state.extraction.source.filename } }
