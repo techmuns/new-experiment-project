@@ -147,6 +147,28 @@ const KEYWORDS: Record<CategoryKey, Keyword[]> = {
   contradiction: [],
 };
 
+// Phase 6F.1: brokerage rating-system disclaimer boilerplate. The two
+// PDFs typically open with text like "BUY Price expected to move in the
+// range of 20%+ upside …" / "HOLD Price expected to move in the range
+// of 10% downside to 10% upside …" that defines the broker's rating
+// bands. These sentences score high on valuation_anchor keywords but
+// add zero thesis signal — filter them out before sentence selection.
+const DISCLAIMER_PATTERNS: RegExp[] = [
+  /price expected to move in the range/i,
+  /\bfor stocks with market capitalisation\b/i,
+  /\brating system\b/i,
+  /\bratings? definitions?\b/i,
+  /\binvestment ratings?\b.*\bdefin/i,
+  /\bclassif(?:y|ication).*\bratings?\b/i,
+];
+
+function isDisclaimerSentence(text: string): boolean {
+  for (const re of DISCLAIMER_PATTERNS) {
+    if (re.test(text)) return true;
+  }
+  return false;
+}
+
 // Output priority order — drives flag selection.
 const CATEGORY_ORDER: CategoryKey[] = [
   "valuation_anchor",
@@ -266,6 +288,12 @@ function segmentSentences(text: string): Sentence[] {
       bufStart = -1;
       return;
     }
+    // Phase 6F.1: skip brokerage rating-system disclaimer sentences.
+    if (isDisclaimerSentence(trimmed)) {
+      buf = "";
+      bufStart = -1;
+      return;
+    }
     if (trimmed.length >= 30 && trimmed.length <= 320) {
       // Find the actual start position of the trimmed slice within text.
       const ltrim = buf.length - buf.trimStart().length;
@@ -364,14 +392,21 @@ function extractRecommendation(text: string): string | undefined {
 }
 
 function extractTargetPrice(text: string): string | undefined {
-  const re = /(?:target price|price target|\bPT\b|\bTP\b)\s*[:=]?\s*((?:INR|Rs\.?|USD|EUR|\$|₹)?\s*[\d,]+(?:\.\d+)?)/i;
+  // Phase 6F.1: accept connector words ("of", "at", "to") between the
+  // anchor phrase and the numeric value. The earlier regex missed
+  // "target price of INR 1,750" because it forced an immediate
+  // `[:=]?\s*` jump to the number.
+  const re = /(?:target price|price target|\bPT\b|\bTP\b)\s*(?:[:=]|of|at|to|\bof\b|\bat\b)?\s*((?:INR|Rs\.?|USD|EUR|\$|₹)?\s*[\d,]+(?:\.\d+)?)/i;
   const m = text.match(re);
   return m ? m[1].trim() : undefined;
 }
 
 function extractUpside(text: string): string | undefined {
-  const re = /\bupside\s*(?:of)?\s*(\d+(?:\.\d+)?\s*%)/i;
-  const m = text.match(re);
+  // Phase 6F.1: handle both word orders — "upside of 18%" AND
+  // "18% upside" / "implying 18% upside". Prefer the first match.
+  const reWordFirst = /\bupside\s*(?:of)?\s*(\d+(?:\.\d+)?\s*%)/i;
+  const reNumFirst = /(\d+(?:\.\d+)?\s*%)\s+upside/i;
+  const m = text.match(reWordFirst) ?? text.match(reNumFirst);
   return m ? m[1].trim() : undefined;
 }
 
@@ -600,17 +635,33 @@ export function buildBaselineMemoUnderstanding(
   }
 
   // ---- Metadata ----
-  const recommendation = extractRecommendation(text);
-  const targetPrice = extractTargetPrice(text);
-  const upside = extractUpside(text);
-  const valuationAnchor = extractValuationAnchor(text);
+  // Phase 6F.1: strip disclaimer/boilerplate sentences before regex
+  // extraction so "HOLD Price expected to move in the range…" can't
+  // override "We rate Havells BUY".
+  const metadataText = text
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => !isDisclaimerSentence(s))
+    .join(" ");
+  const recommendation = extractRecommendation(metadataText);
+  const targetPrice = extractTargetPrice(metadataText);
+  const upside = extractUpside(metadataText);
+  const valuationAnchor = extractValuationAnchor(metadataText);
 
   // ---- Summary ----
   const topValSentence = (byCategory.get("valuation_anchor") ?? [])[0];
   const topFinSentence = (byCategory.get("financial_claim") ?? [])[0];
   const topRiskSentence = (byCategory.get("risk") ?? [])[0];
+  // Phase 6F.1: informative oneLineSummary — splice in target price +
+  // upside when known. The earlier "<Buy/Hold> thesis on <co> anchored
+  // on the memo's specific claims." template was generic noise.
   const recommendationWord = recommendation ? recommendation : "Buy";
-  const oneLineSummary = `${capitalize(recommendationWord.toLowerCase())} thesis on ${args.companyName} anchored on the memo's specific claims.`;
+  const recoCap = capitalize(recommendationWord.toLowerCase());
+  const tgtSegment = targetPrice ? ` · target ${targetPrice}` : "";
+  const upSegment = upside ? ` (${upside} upside)` : "";
+  const oneLineSummary = truncate(
+    `${recoCap} on ${args.companyName}${tgtSegment}${upSegment}.`,
+    160,
+  );
   const shortSummaryParts: string[] = [];
   if (topValSentence) shortSummaryParts.push(truncate(topValSentence.text, 200));
   if (topFinSentence && topFinSentence.start !== topValSentence?.start) {
