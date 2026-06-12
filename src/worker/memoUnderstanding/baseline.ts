@@ -12,6 +12,12 @@ import type {
   MemoUnderstandingThesisPillar,
   ResearchDetectionInput,
 } from "@shared/types";
+import {
+  scanTables,
+  selectFinancialRows,
+  selectSegmentRows,
+  type TableRowClaim,
+} from "./tableScan";
 
 // Phase 6A.3: deterministic memo-baseline recovery tier.
 //
@@ -626,35 +632,129 @@ export function buildBaselineMemoUnderstanding(
     }
   }
 
-  // ---- Key claims (numeric extraction) ----
-  const numericClaims = extractNumericClaims(sentences);
-  const keyClaims: MemoUnderstandingFinancialClaim[] = numericClaims.map((nc, i) => ({
-    id: `bfc${String(i + 1).padStart(2, "0")}`,
-    metric: nc.metric,
-    value: nc.value,
-    claimType: nc.claimType,
-    whyItMatters: `Matters for updating the memo because ${nc.metric} drives the memo's quantitative thesis.`,
-    researchQuestion: `Did ${nc.metric} (${nc.value} in the memo) sustain, beat, or miss in the latest period?`,
-  }));
+  // ---- Phase 6G: table scan ----
+  // Broker memos carry their thesis-critical numbers in flattened
+  // quarterly tables (segment revenue / YoY growth / EBIT margin / IS
+  // lines) that the sentence segmenter rejects as too long — so the
+  // prose-regex extractor below never saw them. scanTables parses those
+  // tables deterministically (verbatim values aligned to verbatim
+  // period headers) and feeds BOTH keyClaims and segmentClaims.
+  const tableRows = scanTables(text);
+  const tableFinancialRows = selectFinancialRows(tableRows, 4);
+  const tableSegmentRows = selectSegmentRows(tableRows, MAX_SEGMENT_CLAIMS);
 
-  // ---- Segment claims (use top segment_driver sentences with numeric anchors) ----
+  // ---- Key claims (prose + table, interleaved) ----
+  // Order: prose claims carry narrative context (max 3), then the top
+  // segment beat/miss rows (max 2 — these are usually THE thesis
+  // numbers, e.g. 'Cables YoY 33% vs 21%E'), then financial table rows
+  // fill to MAX_KEY_CLAIMS. Dedupe by lowercase metric.
+  const numericClaims = extractNumericClaims(sentences);
+  const keyClaims: MemoUnderstandingFinancialClaim[] = [];
+  const seenMetricKeys = new Set<string>();
+  const pushKeyClaim = (
+    metric: string,
+    value: string,
+    claimType: MemoUnderstandingClaimType,
+    period: string | undefined,
+    whyItMatters: string,
+    researchQuestion: string,
+  ): void => {
+    if (keyClaims.length >= 6) return;
+    const key = metric.toLowerCase();
+    if (seenMetricKeys.has(key)) return;
+    seenMetricKeys.add(key);
+    keyClaims.push({
+      id: `bfc${String(keyClaims.length + 1).padStart(2, "0")}`,
+      metric,
+      value,
+      claimType,
+      ...(period ? { period } : {}),
+      whyItMatters,
+      researchQuestion,
+    });
+  };
+  // Table rows LEAD — they're verbatim, period-aligned, and carry the
+  // beat/miss read. Prose claims fill the remainder, with a value-dup
+  // guard (the prose extractor tends to re-emit the same '5%' under
+  // three different metric names from one sentence).
+  for (const row of tableSegmentRows.slice(0, 2)) {
+    pushKeyClaim(
+      tableRowMetricName(row),
+      tableRowValueString(row),
+      "reported",
+      row.period,
+      `Matters because ${row.label} was a core driver in the memo's print.`,
+      `Did ${row.label} sustain ${tableRowValueString(row)} after ${row.period}?`,
+    );
+  }
+  for (const row of tableFinancialRows) {
+    pushKeyClaim(
+      tableRowMetricName(row),
+      tableRowValueString(row),
+      "reported",
+      row.period,
+      `Matters because ${row.label} anchors the memo's quantitative thesis.`,
+      `Did ${row.label} (${row.value} in ${row.period}) sustain, beat, or miss in the latest period?`,
+    );
+  }
+  const seenProseValues = new Set(keyClaims.map((c) => c.value));
+  for (const nc of numericClaims) {
+    if (seenProseValues.has(nc.value)) continue;
+    seenProseValues.add(nc.value);
+    pushKeyClaim(
+      nc.metric,
+      nc.value,
+      nc.claimType,
+      undefined,
+      `Matters because ${nc.metric} drives the memo's quantitative thesis.`,
+      `Did ${nc.metric} (${nc.value} in the memo) sustain, beat, or miss in the latest period?`,
+    );
+  }
+
+  // ---- Segment claims (table-first; sentence fallback) ----
+  // Table rows carry the segment names the memo itself uses — no
+  // hardcoded company-specific keyword lists. The legacy sentence path
+  // only fires when the memo had no parseable tables.
   const segmentClaims: MemoUnderstandingSegmentClaim[] = [];
-  const segmentDriverSentences = byCategory.get("segment_driver") ?? [];
   let segSeq = 1;
-  for (const s of segmentDriverSentences) {
+  for (const row of tableSegmentRows) {
     if (segmentClaims.length >= MAX_SEGMENT_CLAIMS) break;
-    const segMatch = s.text.match(/\b(C&W|Lloyd|ECD|RAC|cables|wires|switchgear|lighting)\b/i);
-    if (!segMatch) continue;
-    const num = s.text.match(/(\d+(?:\.\d+)?\s*%|\d+bps|\d+\s*bps)/);
+    const blockKind = row.blockHint ?? "metric";
     segmentClaims.push({
       id: `bsc${String(segSeq).padStart(2, "0")}`,
-      segment: segMatch[1],
-      claim: truncate(s.text, 240),
+      segment: truncate(row.label, 60),
+      claim: truncate(
+        `${row.label} ${blockKind}: ${tableRowValueString(row)} in ${row.period}.`,
+        240,
+      ),
+      metric: truncate(blockKind, 60),
+      value: row.value,
+      period: row.period,
       importance: "high",
-      researchQuestion: `Did the ${segMatch[1]} segment continue to drive the print after the memo period?`,
-      ...(num ? { value: num[1].trim() } : {}),
+      researchQuestion: truncate(
+        `Did ${row.label} sustain this trajectory after ${row.period}?`,
+        140,
+      ),
     });
     segSeq += 1;
+  }
+  if (segmentClaims.length === 0) {
+    const segmentDriverSentences = byCategory.get("segment_driver") ?? [];
+    for (const s of segmentDriverSentences) {
+      if (segmentClaims.length >= MAX_SEGMENT_CLAIMS) break;
+      const segMatch = s.text.match(/\b(C&W|Lloyd|ECD|RAC|cables|wires|switchgear|lighting)\b/i);
+      if (!segMatch) continue;
+      const num = s.text.match(/(\d+(?:\.\d+)?\s*%|\d+bps|\d+\s*bps)/);
+      segmentClaims.push({
+        id: `bsc${String(segSeq).padStart(2, "0")}`,
+        segment: segMatch[1],
+        claim: truncate(s.text, 240),
+        importance: "high",
+        researchQuestion: `Did the ${segMatch[1]} segment continue to drive the print after the memo period?`,
+        ...(num ? { value: num[1].trim() } : {}),
+      });
+      segSeq += 1;
+    }
   }
 
   // ---- Metadata ----
@@ -957,6 +1057,32 @@ function labelSuffix(cat: CategoryKey, text: string): string | undefined {
     case "contradiction":
       return undefined;
   }
+}
+
+// Phase 6G: display name for a table row — fold the block kind into the
+// metric so 'Cables' under 'YoY Revenue Growth' reads as
+// "Cables YoY growth" instead of a bare segment name.
+function tableRowMetricName(row: TableRowClaim): string {
+  const label = row.label;
+  if (!row.blockHint) return label;
+  const hint = row.blockHint.toLowerCase();
+  if (/yoy|growth/.test(hint) && !/yoy|growth/i.test(label)) {
+    return `${label} YoY growth`;
+  }
+  if (/margin/.test(hint) && !/margin/i.test(label)) {
+    return `${label} EBIT margin`;
+  }
+  if (/revenue/.test(hint) && !/revenue/i.test(label)) {
+    return `${label} revenue`;
+  }
+  return label;
+}
+
+// Verbatim value plus beat/miss read when the table had an estimate
+// column: "33% (vs 21% est)".
+function tableRowValueString(row: TableRowClaim): string {
+  if (!row.estimate) return row.value;
+  return `${row.value} (vs ${row.estimate} est)`;
 }
 
 // Phase 6F: polish an extracted anchor phrase for display. Strips
