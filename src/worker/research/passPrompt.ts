@@ -146,6 +146,17 @@ function buildUserPrompt(req: ResearchPassRequest): string {
       `- Memo period is fiscal-label-only (no calendar mapping). Look for developments from the most recent quarter attributable to the company, through ${detection.researchCurrent}. Acknowledge this assumption in warnings[].`,
     );
   }
+  // Phase 6F.2: nudge the model toward the NEXT reporting period after
+  // the memo's stated quarter. The original prompt asked for "developments
+  // between memo date and today" which is correct but doesn't say
+  // "specifically the next print." Most of the high-signal data points
+  // since the memo are the next quarter's results + the next annual
+  // report — naming that explicitly lifts coverage materially.
+  const nextHints = nextReportingHints(detection.periodLabel);
+  if (nextHints.length > 0) {
+    lines.push("- The MOST IMPORTANT data points to find are:");
+    for (const h of nextHints) lines.push(`  - ${h}`);
+  }
   if (detection.assumptionNotes && detection.assumptionNotes.length > 0) {
     lines.push("- Period assumption notes to acknowledge:");
     for (const note of detection.assumptionNotes) lines.push(`  - ${note}`);
@@ -334,6 +345,63 @@ function appendUserPrioritiesBlock(
       lines.push(`- ${line}`);
     }
   }
+}
+
+// Phase 6F.2: parse the memo's period label and emit hints for the
+// next reporting period the research model should hunt down. The hints
+// are conservative — they only fire when we can identify a quarter or
+// fiscal year, and they describe what the LIKELY NEXT data point is
+// without claiming a calendar date.
+function nextReportingHints(periodLabel: string): string[] {
+  if (typeof periodLabel !== "string" || periodLabel.length === 0) return [];
+  const out: string[] = [];
+  const upper = periodLabel.toUpperCase();
+
+  // Quarter parsing — e.g. "3QFY26", "Q3 FY26", "3Q26"
+  const qm = upper.match(/\bQ?([1-4])\s*Q?\s*FY?\s*(\d{2,4})\b/);
+  if (qm) {
+    const q = parseInt(qm[1], 10);
+    const fy = qm[2].length === 2 ? `FY${qm[2]}` : `FY${qm[2].slice(-2)}`;
+    if (q < 4) {
+      const nextQ = `Q${q + 1}${fy}`;
+      out.push(
+        `The memo covers Q${q}${fy}; the NEXT print is ${nextQ} — find its result release, earnings call transcript, and any management commentary on the same drivers the memo discussed.`,
+      );
+      if (q === 3) {
+        out.push(
+          `Q4${fy} is typically released alongside the ${fy} annual results / ${fy} annual report — explicitly look for the ${fy} annual report (auditor remarks, related-party transactions, full shareholding pattern).`,
+        );
+      }
+    } else {
+      const nextFy = `FY${(parseInt(fy.slice(2), 10) + 1).toString().padStart(2, "0")}`;
+      out.push(
+        `The memo covers Q4${fy} / ${fy}; the NEXT print is Q1${nextFy} — find its result release, earnings call transcript, and any guidance update.`,
+      );
+      out.push(
+        `The ${fy} annual report is typically published 2–4 months after Q4 results; look for auditor remarks, related-party transactions, full shareholding pattern.`,
+      );
+    }
+  } else {
+    // Fiscal-year only
+    const fm = upper.match(/\bFY\s*(\d{2,4})\b/);
+    if (fm) {
+      const fy = fm[1].length === 2 ? `FY${fm[1]}` : `FY${fm[1].slice(-2)}`;
+      const nextFy = `FY${(parseInt(fy.slice(2), 10) + 1).toString().padStart(2, "0")}`;
+      out.push(
+        `The memo anchors on ${fy} numbers; the NEXT data points to find are Q1${nextFy} / Q2${nextFy} results since the memo was written.`,
+      );
+      out.push(
+        `Also look for the ${fy} annual report and any rating actions / target-price revisions by other brokers since the memo.`,
+      );
+    }
+  }
+  // Generic — fires when no quarter could be parsed.
+  if (out.length === 0) {
+    out.push(
+      "The memo is anchored on the period above. Find: (a) the next quarterly result release after this memo, (b) the next earnings call transcript, (c) the latest shareholding pattern filing, (d) any rating or target-price revisions since the memo date.",
+    );
+  }
+  return out;
 }
 
 function formatAliases(aliases: ResearchPassCompanyAliases): string[] {

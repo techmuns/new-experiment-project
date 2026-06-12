@@ -160,7 +160,30 @@ const DISCLAIMER_PATTERNS: RegExp[] = [
   /\bratings? definitions?\b/i,
   /\binvestment ratings?\b.*\bdefin/i,
   /\bclassif(?:y|ication).*\bratings?\b/i,
+  /\bplease see appendix\b/i,
+  /\bimportant disclosures and disclaimers\b/i,
+  /\bresearch analyst certification\b/i,
 ];
+
+// Phase 6F.2: "broker-template scaffolding" — header lines that
+// announce the rec/target/value framework without adding thesis
+// signal ("We rate X BUY", "We value X at INR …", "We maintain BUY
+// with a PT of …"). These match correctly for metadata extraction
+// but pollute the shortSummary picker, which the dashboard renders
+// as the visible context line. Filter them out of summary selection
+// but KEEP them for the metadata regex pass.
+const SCAFFOLDING_PATTERNS: RegExp[] = [
+  /\bwe\s+(?:rate|value|maintain|reiterate|initiate)\b/i,
+  /\bwe\s+(?:rate|value)\s+\w+\s+(?:at|with)\b/i,
+  /\bwith\s+a\s+(?:PT|TP|price target)\s+of\b/i,
+];
+
+function isScaffoldingSentence(text: string): boolean {
+  for (const re of SCAFFOLDING_PATTERNS) {
+    if (re.test(text)) return true;
+  }
+  return false;
+}
 
 function isDisclaimerSentence(text: string): boolean {
   for (const re of DISCLAIMER_PATTERNS) {
@@ -648,9 +671,21 @@ export function buildBaselineMemoUnderstanding(
   const valuationAnchor = extractValuationAnchor(metadataText);
 
   // ---- Summary ----
-  const topValSentence = (byCategory.get("valuation_anchor") ?? [])[0];
-  const topFinSentence = (byCategory.get("financial_claim") ?? [])[0];
-  const topRiskSentence = (byCategory.get("risk") ?? [])[0];
+  // Phase 6F.2: skip broker scaffolding ("We rate X BUY",
+  // "We value X at INR…") when choosing the visible summary
+  // sentences. Those carry no thesis-specific signal — what we want is
+  // the actual print read ("C&W drives revenue beat", "PAT below
+  // expectations on lower other income", etc.).
+  const pickTop = (cat: CategoryKey): Sentence | undefined => {
+    const list = byCategory.get(cat) ?? [];
+    for (const s of list) {
+      if (!isScaffoldingSentence(s.text)) return s;
+    }
+    return list[0];
+  };
+  const topValSentence = pickTop("valuation_anchor");
+  const topFinSentence = pickTop("financial_claim");
+  const topRiskSentence = pickTop("risk");
   // Phase 6F.1: informative oneLineSummary — splice in target price +
   // upside when known. The earlier "<Buy/Hold> thesis on <co> anchored
   // on the memo's specific claims." template was generic noise.

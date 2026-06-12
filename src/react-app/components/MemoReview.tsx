@@ -19,6 +19,7 @@ import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { SIGNAL_BADGE_TONE, SIGNAL_LABEL } from "../lib/signalDisplay";
 import { buildPrintHtml } from "../lib/memoPrint";
+import { downloadMemoPdf } from "../lib/memoPdf";
 
 const CONFIDENCE_TONE: Record<MemoConfidence, "success" | "warning" | "neutral"> = {
   high: "success",
@@ -83,6 +84,15 @@ export function MemoReview({
     w.document.write(html);
     w.document.close();
   };
+  // Phase 6F.2: real client-side PDF with embedded text — replaces the
+  // print-window path for the canonical download. Searchable, copy-
+  // pasteable, properly fonted, ≤3 pages. The Print / Save as PDF
+  // button is kept as a secondary option for users who specifically
+  // want browser-rendered output. Dynamic import means the ~400 KB
+  // jsPDF+html2canvas chunk only loads when the user clicks.
+  const downloadPdf = async (): Promise<void> => {
+    await downloadMemoPdf(memo, filenameStem, { researchWindowLabel });
+  };
 
   const generatedDate = new Date(memo.generatedAt).toLocaleString("en-US", {
     dateStyle: "medium",
@@ -121,17 +131,25 @@ export function MemoReview({
         <div className="flex items-center gap-2 flex-wrap memo-actions">
           <Button
             variant="primary"
-            onClick={downloadMarkdown}
+            onClick={downloadPdf}
             leadingIcon={<Download className="w-4 h-4" />}
           >
-            Download (Markdown)
+            Download PDF
           </Button>
           <Button
             variant="secondary"
+            onClick={downloadMarkdown}
+            leadingIcon={<Download className="w-4 h-4" />}
+          >
+            Markdown
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={printMemo}
             leadingIcon={<Printer className="w-4 h-4" />}
           >
-            Print / Save as PDF
+            Print
           </Button>
           <Button
             variant="outline"
