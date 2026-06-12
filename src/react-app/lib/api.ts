@@ -14,6 +14,7 @@ import type {
   ResearchPassResponse,
   ResearchUpdatesRequest,
   ResearchUpdatesResponse,
+  StockSearchResponse,
 } from "@shared/types";
 import { getLlmGateToken } from "./llmGateToken";
 
@@ -124,5 +125,13 @@ export const api = {
         signal,
         headers: gateHeader(),
       },
+    ),
+  // Company/stock search — the Worker proxies the Muns platform API and
+  // injects the bearer token + static user_index server-side.
+  stockSearch: (query: string, signal?: AbortSignal) =>
+    postJson<StockSearchResponse, { query: string }>(
+      "/api/stock/search",
+      { query },
+      { signal },
     ),
 };

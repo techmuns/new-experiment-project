@@ -1057,3 +1057,23 @@ export type MemoUnderstandingState =
       warnings: LlmGenerationWarning[];
     }
   | { kind: "error"; code: MemoUnderstandErrorCode; message: string };
+
+// ---------- Stock search (Muns platform API proxy) ----------
+
+// One normalized search hit. The upstream API returns each result as a
+// [country, companyName, sector] tuple keyed by ticker; the Worker
+// flattens it into this shape before returning it to the client.
+export interface StockSearchHit {
+  ticker: string;
+  country?: string;
+  companyName: string;
+  sector?: string;
+}
+
+export interface StockSearchRequest {
+  query: string;
+}
+
+export type StockSearchResponse =
+  | { ok: true; total: number; hits: StockSearchHit[]; message: string }
+  | { ok: false; code: string; message: string };

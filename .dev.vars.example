@@ -4,3 +4,6 @@
 # Phase 2+ placeholders:
 # ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
+#
+# Muns platform API bearer token (used by /api/stock/search):
+# MUNS_ACCESS_TOKEN=

@@ -32,6 +32,7 @@ import type {
   LlmGenerationErrorCode,
   LlmProviderName,
   LlmStatusResponse,
+  StockSearchHit,
 } from "@shared/types";
 import type { LlmGenerationWarning } from "@shared/types";
 import {
@@ -141,6 +142,100 @@ app.get("/api/llm/status", (c) => {
 app.post("/api/research/updates", (c) => handleResearchUpdates(c));
 app.post("/api/research/pass", (c) => handleResearchPass(c));
 app.post("/api/memo/understand", (c) => handleMemoUnderstand(c));
+
+// Stock/company search — proxies the Muns platform API so the bearer
+// token (MUNS_ACCESS_TOKEN) never reaches the browser. user_index is a
+// fixed server-side value. Always responds 200 with an { ok } envelope so
+// the client can branch without losing the error body.
+app.post("/api/stock/search", async (c) => {
+  const token = c.env.MUNS_ACCESS_TOKEN;
+  if (!token) {
+    return c.json({
+      ok: false,
+      code: "not_configured",
+      message:
+        "Stock search is unavailable: MUNS_ACCESS_TOKEN is not set on the Worker.",
+    });
+  }
+
+  let query = "";
+  try {
+    const body = (await c.req.json()) as { query?: unknown };
+    if (typeof body.query === "string") query = body.query.trim();
+  } catch {
+    return c.json({ ok: false, code: "bad_request", message: "Invalid JSON body." });
+  }
+  if (!query) {
+    return c.json({ ok: false, code: "bad_request", message: "query is required." });
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  let upstream: Response;
+  try {
+    upstream = await fetch("https://devde.muns.io/stock/search", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query, user_index: 124 }),
+      signal: controller.signal,
+    });
+  } catch {
+    const timedOut = controller.signal.aborted;
+    return c.json({
+      ok: false,
+      code: timedOut ? "timeout" : "upstream_error",
+      message: timedOut
+        ? "Stock search timed out."
+        : "Could not reach the stock search service.",
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!upstream.ok) {
+    return c.json({
+      ok: false,
+      code: "upstream_error",
+      message: `Stock search failed (${upstream.status}).`,
+    });
+  }
+
+  let payload: unknown;
+  try {
+    payload = await upstream.json();
+  } catch {
+    return c.json({
+      ok: false,
+      code: "parse_error",
+      message: "Stock search returned malformed data.",
+    });
+  }
+
+  const data = (payload as { data?: unknown })?.data;
+  const resultsRaw = (data as { results?: unknown })?.results;
+  const hits: StockSearchHit[] =
+    resultsRaw && typeof resultsRaw === "object"
+      ? Object.entries(resultsRaw as Record<string, unknown>).map(
+          ([ticker, tuple]) => {
+            const arr = Array.isArray(tuple) ? (tuple as unknown[]) : [];
+            return {
+              ticker,
+              country: typeof arr[0] === "string" ? arr[0] : undefined,
+              companyName: typeof arr[1] === "string" ? arr[1] : ticker,
+              sector: typeof arr[2] === "string" ? arr[2] : undefined,
+            };
+          },
+        )
+      : [];
+  const totalRaw = (data as { total_results?: unknown })?.total_results;
+  const total = typeof totalRaw === "number" ? totalRaw : hits.length;
+
+  return c.json({ ok: true, total, hits, message: "" });
+});
 
 app.post("/api/generate/follow-up-memo", async (c) => {
   const declaredLength = Number(c.req.header("content-length") ?? "0");

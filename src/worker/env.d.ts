@@ -5,6 +5,9 @@ declare global {
   interface Env {
     LLM_API_KEY?: string;
     LLM_GATE_SECRET?: string;
+    // Bearer token for the Muns platform API (stock search). Set via
+    // `wrangler secret put MUNS_ACCESS_TOKEN`.
+    MUNS_ACCESS_TOKEN?: string;
   }
 }
 export {};
