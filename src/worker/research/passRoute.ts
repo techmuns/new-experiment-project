@@ -33,9 +33,27 @@ import {
 import { enforceSourceGrounding } from "./validate";
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
-const PASS_MAX_OUTPUT_TOKENS = 2_500;
-const PASS_COMPACT_MAX_OUTPUT_TOKENS = 1_500;
+// Phase 6G.1: raised after diagnosing parse_error on the official_results
+// pass (longest prompt of the six, with the Phase 6B shareholding-scope
+// expansion + Phase 6F.2 next-reporting hints + memo-anchor block + user
+// priorities). A complete research-pass JSON with up to 4 findings and
+// 3 sources each runs ~3.5–5k output tokens, and on reasoning models
+// (gpt-5.x) max_output_tokens covers reasoning tokens too — the old
+// 2,500 budget truncated mid-JSON on the heaviest pass. The web_search
+// tool output is ALSO part of the budget on the Responses API, so the
+// effective JSON budget was even smaller. These are ceilings, not spend.
+const PASS_MAX_OUTPUT_TOKENS = 6_000;
+const PASS_COMPACT_MAX_OUTPUT_TOKENS = 3_500;
 const GATE_HEADER = "x-memo-llm-gate";
+
+// Attach reasoning effort only on model families that accept the
+// `reasoning` param; other models reject unknown params with HTTP 400.
+// "low" is the right setting for structured extraction with web search:
+// frees the budget for tool calls + JSON, cuts latency materially.
+function reasoningEffortForModel(model: string | undefined): "low" | undefined {
+  if (!model) return undefined;
+  return /^(gpt-5|o\d)/i.test(model) ? "low" : undefined;
+}
 
 const WEB_SEARCH_TOOL = { type: "web_search" } as const;
 const WEB_SEARCH_TOOL_CHOICE = { type: "web_search" } as const;
@@ -179,6 +197,7 @@ export async function handleResearchPass(
       toolChoice: WEB_SEARCH_TOOL_CHOICE,
       include: [...PASS_INCLUDE],
       maxTokens,
+      reasoningEffort: reasoningEffortForModel(readiness.model),
       abortSignal: c.req.raw.signal,
       logEventTag: "llm_research_pass",
     });

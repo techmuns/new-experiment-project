@@ -1090,6 +1090,18 @@ function tableRowValueString(row: TableRowClaim): string {
 // ("other income)" → "other income"), and drops a doubled category
 // keyword head ("risk is a slowdown…" → "a slowdown…", which renders
 // as "Risk — a slowdown…" instead of "Risk — risk is a slowdown…").
+// Phase 6F: polish an extracted anchor phrase for display. Strips
+// dangling brackets/quotes, drops doubled keyword heads
+// ("risk is a slowdown" → "a slowdown"), and rejects degenerate
+// suffixes (anchors that are JUST a category keyword, or that look
+// like broker-letterhead noise).
+const ANCHOR_DEGENERATE_RE =
+  /^(segment|risk|catalyst|margin|earnings|valuation|financial|management|claim)s?$/i;
+// Phase 6G.1: anchors that obviously came from a flattened citation
+// strip ("Beas Capital SaaS - Rategain Street Estimates ( IIFL cap )")
+// — multiple uppercase tokens + a parenthesized brand acronym.
+const ANCHOR_LETTERHEAD_RE = /\s\(\s*[A-Z]{2,}\s+[a-z]+\s*\)/;
+
 function cleanAnchor(s: string | undefined): string | undefined {
   if (!s) return undefined;
   let out = s.trim();
@@ -1097,6 +1109,22 @@ function cleanAnchor(s: string | undefined): string | undefined {
   out = out.replace(/^[()[\]{}"'.,;:\s—–-]+/, "");
   out = out.replace(/[()[\]{}"'.,;:\s—–-]+$/, "");
   out = out.replace(/\s{2,}/g, " ");
+  if (out.length < 3) return undefined;
+  // Degenerate match: anchor equals the category keyword we just
+  // stripped (the regex captured no extra context, just "segment").
+  if (ANCHOR_DEGENERATE_RE.test(out)) return undefined;
+  // Broker-letterhead noise — drop the whole suffix.
+  if (ANCHOR_LETTERHEAD_RE.test(out)) return undefined;
+  // Phase 6G.1: cut on the FIRST sentence-boundary candidate we find
+  // mid-string. PDF flatten joins unrelated sentences with a single
+  // space, so a 70-char regex window can span two sentences
+  // ("margin expansion Raised Rs.600 cr in nov '23 via QIP"). Splitting
+  // on a capitalized word that follows a lowercase one is a cheap
+  // proxy for "new sentence started here".
+  const split = out.match(/^(.{6,}?\b[a-z][a-z'-]*)\s+([A-Z][a-z]+\s+[A-Z])/);
+  if (split && split[1].length < out.length - 10) {
+    out = split[1].replace(/[(),;:\s-]+$/, "");
+  }
   return out.length >= 3 ? out : undefined;
 }
 

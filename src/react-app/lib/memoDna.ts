@@ -154,6 +154,24 @@ const BROKER_CANONICALS: readonly string[] = [
   "bank of america",
   "credit suisse",
   "deutsche bank",
+  "beas capital",
+  "beas capital management",
+  "incred capital",
+  "incred research",
+  "incred",
+  "phillipcapital",
+  "phillip capital",
+  "investec",
+  "ventura securities",
+  "ventura",
+  "monarch networth",
+  "monarch",
+  "yes securities",
+  "icici direct",
+  "geojit",
+  "prabhudas lilladher",
+  "plindia",
+  "sharekhan limited",
   "daiwa",
   "nomura",
   "sbicap",
@@ -251,6 +269,15 @@ export function detectCompanyFromTextDetailed(
     /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/g,
   ) ?? []) {
     phraseSet.add(m);
+  }
+  // Phase 6G.1: camelCase / PascalCase tokens like "RateGain",
+  // "BlackRock", "SAP", "BAT". The original title-case regex required
+  // a lowercase letter between each capital ("Rate Gain" with a space),
+  // so RateGain only contributed "RateGain" as a single-token candidate
+  // that no later pass picked up.
+  const mixedCaseRe = /\b([A-Z][a-z]+[A-Z][A-Za-z]+(?:\s+[A-Z][a-z]+){0,3})\b/g;
+  for (const m of safeText.matchAll(mixedCaseRe)) {
+    if (m[1]) phraseSet.add(m[1]);
   }
   // matchAll → capture both the full suffixed form ("ICICI Bank Ltd") and
   // the unsuffixed name ("ICICI Bank") so the scorer can compare. The
@@ -373,6 +400,28 @@ function tokenSubseq(a: string[], b: string[]): boolean {
   return false;
 }
 
+// Generic broker-suffix tokens: any 2–3 token candidate whose TRAILING
+// token reads as a research-firm suffix ("X Capital", "X Securities",
+// "X Research", "X Institutional", "X Brokerage") is treated as a
+// broker even when not in the canonical list. This catches the long
+// tail of niche research houses (Beas Capital, Plutus Capital,
+// Anand Securities, etc.) without needing to enumerate every one.
+const BROKER_SUFFIX_TOKENS = new Set([
+  "capital",
+  "securities",
+  "research",
+  "institutional",
+  "brokerage",
+  "broking",
+  "stockbroking",
+  "advisors",
+  "advisory",
+  "asset",
+  "wealth",
+  "investments",
+  "investment",
+]);
+
 function isBrokerPhrase(candidate: string): boolean {
   const toks = tokenize(candidate);
   if (toks.length === 0) return false;
@@ -389,6 +438,14 @@ function isBrokerPhrase(candidate: string): boolean {
     }
     if (tokenSubseq(toks, broker)) return true;
     if (tokenSubseq(broker, toks)) return true;
+  }
+  // Structural suffix check — drops the broker even if it's not in the
+  // canonical list. Restricted to short (2-3 token) candidates so we
+  // never knock out a real company name that just happens to contain
+  // the word "capital" deep inside it.
+  if (toks.length >= 2 && toks.length <= 3) {
+    const last = toks[toks.length - 1];
+    if (BROKER_SUFFIX_TOKENS.has(last)) return true;
   }
   return false;
 }
