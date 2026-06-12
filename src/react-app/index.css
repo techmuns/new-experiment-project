@@ -1,79 +1,70 @@
 @import "tailwindcss";
 
-/* ---------------------------------------------------------------------------
-   Munshot Dashboard design tokens.
-   Per the dashboard-builder skill: indigo primary + grayscale UI chrome,
-   system-ui only (no custom fonts loaded). These are the canonical tokens
-   the dashboard components reference; the @theme block below keeps a few
-   legacy aliases so dormant pre-rewrite modules still resolve.
---------------------------------------------------------------------------- */
-:root {
-  /* Primary — indigo */
-  --ds-primary: #4f46e5;
-  --ds-primary-light: #eef2ff;
-  --ds-primary-border: #e0e7ff;
-  --ds-primary-text: #4338ca;
-
-  /* Surfaces */
-  --ds-page-bg: linear-gradient(to bottom, rgba(249, 250, 251, 0.8), #ffffff);
-  --ds-card-bg: rgba(255, 255, 255, 0.9);
-  --ds-card-header-bg: rgba(255, 255, 255, 0.95);
-  --ds-card-body-bg: rgba(249, 250, 251, 0.5);
-  --ds-header-bar-bg: rgba(255, 255, 255, 0.95);
-
-  /* Borders */
-  --ds-border: rgba(229, 231, 235, 0.8);
-  --ds-border-solid: #e5e7eb;
-  --ds-border-hover: rgba(79, 70, 229, 0.2);
-
-  /* Text */
-  --ds-text-primary: #111827;
-  --ds-text-secondary: #374151;
-  --ds-text-muted: #6b7280;
-  --ds-text-hint: #9ca3af;
-
-  /* Status */
-  --ds-error: #ef4444;
-  --ds-error-bg: #fef2f2;
-
-  --ds-transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 @theme {
-  /* Legacy aliases — kept so dormant pre-rewrite modules keep resolving.
-     The active dashboard uses the --ds-* tokens above. */
-  --color-bg: #ffffff;
+  /* Neutral ramp — clean grayscale (Munshot palette) */
+  --color-paper: #f9fafb;
+  --color-bg: #f9fafb;
   --color-surface: #ffffff;
-  --color-surface-muted: #f4f4f5;
+  --color-surface-muted: #f3f4f6;
+  --color-surface-sunken: #e5e7eb;
+
   --color-border: #e5e7eb;
   --color-border-strong: #d1d5db;
+  --color-border-ink: #111827;
+
   --color-text: #111827;
   --color-text-muted: #6b7280;
   --color-text-subtle: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  /* Primary — indigo (Munshot brand) */
   --color-ink: #4f46e5;
   --color-ink-hover: #4338ca;
   --color-ink-soft: #eef2ff;
   --color-ink-foreground: #ffffff;
+
+  /* Backwards-compatible alias so existing accent usage still resolves */
   --color-accent: #4f46e5;
   --color-accent-hover: #4338ca;
   --color-accent-soft: #eef2ff;
-  --color-success: #16a34a;
-  --color-success-soft: #f0fdf4;
+
+  /* Signal colors — restrained */
+  --color-signal-up: #16a34a;
+  --color-signal-up-soft: #f0fdf4;
+  --color-signal-down: #dc2626;
+  --color-signal-down-soft: #fef2f2;
+  --color-signal-flat: #6b7280;
+  --color-signal-flat-soft: #f3f4f6;
+
   --color-warning: #d97706;
   --color-warning-soft: #fffbeb;
+  --color-success: #16a34a;
+  --color-success-soft: #f0fdf4;
 
+  /* Elevation */
+  --shadow-hairline: 0 0 0 1px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 1px rgba(15, 23, 42, 0.02);
+  --shadow-md:
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.05);
+  --shadow-panel:
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  /* Radii */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;
   --radius-xl: 14px;
 
-  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.04);
-
-  /* No custom fonts — system-ui only, per skill UI Standards. */
-  --font-sans: system-ui, -apple-system, sans-serif;
-  --font-serif: system-ui, -apple-system, sans-serif;
+  --font-sans:
+    "Inter", "InterVariable", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif:
+    "Source Serif Pro", "Iowan Old Style", "Apple Garamond", Baskerville,
+    Georgia, ui-serif, serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
 }
 
 html,
@@ -84,59 +75,137 @@ body,
 
 body {
   margin: 0;
-  /* Page background lives on the outer shell, but mirror it here so the
-     iframe never shows a flash of the host page behind the dashboard. */
-  background: var(--ds-page-bg);
-  color: var(--ds-text-primary);
-  font-family: system-ui, -apple-system, sans-serif;
+  background: linear-gradient(to bottom, rgba(249, 250, 251, 0.8), #ffffff);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings:
+    "cv11" on,
+    "ss01" on,
+    "tnum" on,
+    "cv02" on;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
-  height: 100%;
+  position: relative;
+  z-index: 1;
 }
 
-/* Shimmer skeleton — required loading state for every widget. */
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-.shimmer {
-  background-image: linear-gradient(
-    90deg,
-    #e5e7eb 0%,
-    #f3f4f6 50%,
-    #e5e7eb 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 6px;
+::selection {
+  background: var(--color-ink-soft);
+  color: var(--color-ink);
 }
 
-/* Widget card hover lift — per skill. */
-.widget-card {
-  transition: var(--ds-transition);
-}
-.widget-card:hover {
-  transform: translateY(-4px);
-  border-color: var(--ds-border-hover);
-  box-shadow:
-    0 20px 40px rgba(0, 0, 0, 0.08),
-    0 8px 16px rgba(79, 70, 229, 0.06);
-}
-
-/* Tabular numerals utility — useful in KPIs and tables. */
+/* Tabular numerals utility — useful in tables and financial readouts */
 .tnum {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" on;
 }
 
-::selection {
-  background: var(--ds-primary-light);
-  color: var(--ds-primary-text);
+.serif {
+  font-family: var(--font-serif);
+}
+
+/* Hairline divider used between sections of the memo reader */
+.hairline {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--color-border) 12%,
+    var(--color-border) 88%,
+    transparent
+  );
+}
+
+/* Faint grid pattern reserved for hero/empty panels — opt-in via .grid-bg */
+.grid-bg {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-ink) 5%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-ink) 5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+}
+
+/* Scroll-spy nav button helper */
+.nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-border-strong);
+  transition: background 0.15s ease;
+}
+.nav-dot[data-active="true"] {
+  background: var(--color-ink);
+}
+
+/* Phase 6C/6E: print stylesheet — FALLBACK path only (plain Ctrl+P or a
+   blocked popup). The primary Print button opens a dedicated memo-only
+   document (lib/memoPrint.ts), which is what should normally produce
+   the PDF.
+
+   Implementation note: this MUST use the visibility technique, not
+   display. A descendant of a `display:none` ancestor can never be
+   re-shown, and the memo sits deep inside #root — hiding `body > *`
+   with display produced completely blank PDFs. `visibility` is
+   inherited per-element and CAN be overridden by descendants; the memo
+   subtree is then lifted to the top of the page with absolute
+   positioning so the hidden layout above it doesn't push it down. */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  [data-print="memo"],
+  [data-print="memo"] * {
+    visibility: visible;
+  }
+  [data-print="memo"] {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+  }
+  /* display:none still wins over the visibility rule above — used for
+     the action buttons row, which must not occupy print layout space. */
+  [data-print="memo"] .memo-actions,
+  [data-print="memo"] [data-print-hide] {
+    display: none !important;
+  }
+  [data-print="memo"] article {
+    box-shadow: none !important;
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  [data-print="memo"] table {
+    page-break-inside: avoid;
+  }
+  [data-print="memo"] h2,
+  [data-print="memo"] h3 {
+    page-break-after: avoid;
+  }
 }

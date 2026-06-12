@@ -8,11 +8,17 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { useMemoProject } from "../../state/MemoProjectContext";
+import { useHost } from "../../state/HostContext";
 import { deriveCommandBarValues } from "./commandBarState";
 
 export function CommandBar() {
   const navigate = useNavigate();
   const { state } = useMemoProject();
+  const { context: host } = useHost();
+  // Identify the signed-in user from the Munshot host when embedded; fall
+  // back to the default account label when running outside the host.
+  const userLabel =
+    host.user?.email ?? host.user?.name ?? "tech@muns.io";
   const { projectLabel, trailingTicker, stageLabel, stageTone } =
     deriveCommandBarValues({
       detection: state.detection,
@@ -92,7 +98,7 @@ export function CommandBar() {
           </NavLink>
           <div className="flex items-center gap-1.5 pl-3 ml-1 border-l border-[var(--color-border)] h-7 text-[12px] text-[var(--color-text-muted)]">
             <CircleUser className="w-4 h-4" />
-            <span>tech@muns.io</span>
+            <span>{userLabel}</span>
           </div>
         </div>
       </div>

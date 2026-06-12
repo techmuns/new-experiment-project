@@ -1,10 +1,23 @@
-import { DashboardPage } from "./pages/DashboardPage";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { AppShell } from "./components/layout/AppShell";
+import { WorkspacePage } from "./pages/WorkspacePage";
+import { SettingsPage } from "./pages/SettingsPage";
 
-// Single embedded dashboard surface. No router/sidebar/marketing shell — the
-// Munshot host owns navigation; this app renders the dashboard inside the
-// host iframe and consumes context from the SDK.
 function App() {
-  return <DashboardPage />;
+  return (
+    <AppShell>
+      <Routes>
+        <Route path="/" element={<Navigate to="/workspace" replace />} />
+        <Route path="/workspace" element={<WorkspacePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/intake" element={<Navigate to="/workspace" replace />} />
+        <Route path="/memo-dna" element={<Navigate to="/workspace" replace />} />
+        <Route path="/builder" element={<Navigate to="/workspace" replace />} />
+        <Route path="/output" element={<Navigate to="/workspace" replace />} />
+        <Route path="*" element={<Navigate to="/workspace" replace />} />
+      </Routes>
+    </AppShell>
+  );
 }
 
 export default App;
