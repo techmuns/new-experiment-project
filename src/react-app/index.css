@@ -160,37 +160,50 @@ body::before {
   background: var(--color-ink);
 }
 
-/* Phase 6C: print stylesheet. window.print() should yield a clean memo
-   PDF — just the memo title header + memo body + any expanded
-   supplementary panels. Everything else (workflow rails, status chips,
-   navigation, action buttons) is hidden. */
+/* Phase 6C/6E: print stylesheet — FALLBACK path only (plain Ctrl+P or a
+   blocked popup). The primary Print button opens a dedicated memo-only
+   document (lib/memoPrint.ts), which is what should normally produce
+   the PDF.
+
+   Implementation note: this MUST use the visibility technique, not
+   display. A descendant of a `display:none` ancestor can never be
+   re-shown, and the memo sits deep inside #root — hiding `body > *`
+   with display produced completely blank PDFs. `visibility` is
+   inherited per-element and CAN be overridden by descendants; the memo
+   subtree is then lifted to the top of the page with absolute
+   positioning so the hidden layout above it doesn't push it down. */
 @media print {
   @page {
     size: A4;
     margin: 16mm 14mm;
   }
+  html,
   body {
+    height: auto !important;
+    overflow: visible !important;
     background: #ffffff !important;
   }
-  /* Hide everything except the elements marked print-allowed. The memo
-     reader marks its container with data-print="memo"; everything else
-     in the workspace is dropped to keep the PDF to memo content only. */
-  body > * {
-    display: none !important;
+  body * {
+    visibility: hidden;
   }
   [data-print="memo"],
   [data-print="memo"] * {
-    display: revert !important;
+    visibility: visible;
   }
   [data-print="memo"] {
-    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
     box-shadow: none !important;
     border: 0 !important;
     border-radius: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
     background: #ffffff !important;
   }
+  /* display:none still wins over the visibility rule above — used for
+     the action buttons row, which must not occupy print layout space. */
   [data-print="memo"] .memo-actions,
   [data-print="memo"] [data-print-hide] {
     display: none !important;
@@ -199,9 +212,8 @@ body::before {
     box-shadow: none !important;
     border: 0 !important;
     padding: 0 !important;
-    page-break-inside: auto;
   }
-  [data-print="memo"] section {
+  [data-print="memo"] table {
     page-break-inside: avoid;
   }
   [data-print="memo"] h2,

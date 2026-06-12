@@ -18,6 +18,7 @@ import { humanSourceLabel } from "@shared/sanitizeMemo";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { SIGNAL_BADGE_TONE, SIGNAL_LABEL } from "../lib/signalDisplay";
+import { buildPrintHtml } from "../lib/memoPrint";
 
 const CONFIDENCE_TONE: Record<MemoConfidence, "success" | "warning" | "neutral"> = {
   high: "success",
@@ -64,8 +65,23 @@ export function MemoReview({
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+  // Phase 6E: print via a dedicated, self-contained document. Printing
+  // the app page directly produced blank PDFs (the memo sits deep in the
+  // React tree and a display:none ancestor can't be re-shown). The new
+  // window contains ONLY the memo with compact A4 typography tuned for
+  // a ≤3-page output, auto-triggers the print dialog, and closes itself
+  // after printing. If the popup is blocked we fall back to printing the
+  // app page (the global print CSS handles that path).
   const printMemo = (): void => {
-    window.print();
+    const html = buildPrintHtml(memo, { researchWindowLabel });
+    const w = window.open("", "_blank");
+    if (!w) {
+      window.print();
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   };
 
   const generatedDate = new Date(memo.generatedAt).toLocaleString("en-US", {
