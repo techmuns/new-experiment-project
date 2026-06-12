@@ -1,16 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
 import App from "./App";
-import { MemoProjectProvider } from "./state/MemoProjectContext";
+import { HostContextProvider } from "./state/HostContext";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
-      <MemoProjectProvider>
-        <App />
-      </MemoProjectProvider>
-    </BrowserRouter>
+    <HostContextProvider>
+      <App />
+    </HostContextProvider>
   </StrictMode>,
 );
